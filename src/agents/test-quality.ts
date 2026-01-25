@@ -7,10 +7,10 @@
  * - Best practice violations
  * - Potential bugs
  *
- * Uses Claude Haiku for cost efficiency.
+ * Uses fast tier models for cost efficiency.
  */
 
-import Anthropic from '@anthropic-ai/sdk';
+import type { ModelProvider } from '../lib/model-provider.js';
 import type { FileChange } from '../lib/github.js';
 
 export interface QualityFinding {
@@ -115,7 +115,7 @@ Analyze these changes and provide your findings as JSON.`;
 }
 
 export async function runTestQualityAgent(
-  client: Anthropic,
+  provider: ModelProvider,
   files: FileChange[],
   prTitle: string,
   prBody: string
@@ -151,26 +151,17 @@ export async function runTestQualityAgent(
   const importance = calculateImportance(relevantFiles);
   const systemPrompt = buildSystemPrompt(importance);
 
-  const response = await client.messages.create({
-    model: 'claude-3-5-haiku-20241022',
-    max_tokens: 4096,
-    system: systemPrompt,
-    messages: [
-      {
-        role: 'user',
-        content: prompt,
-      },
-    ],
-  });
-
-  // Extract text content
-  const textContent = response.content.find((c) => c.type === 'text');
-  if (!textContent || textContent.type !== 'text') {
-    throw new Error('No text response from agent');
-  }
+  const response = await provider.chat(
+    {
+      system: systemPrompt,
+      messages: [{ role: 'user', content: prompt }],
+      maxTokens: 4096,
+    },
+    'fast'
+  );
 
   // Parse JSON response
-  const jsonMatch = textContent.text.match(/\{[\s\S]*\}/);
+  const jsonMatch = response.content.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
     throw new Error('Failed to parse agent response as JSON');
   }

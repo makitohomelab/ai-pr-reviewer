@@ -9,7 +9,6 @@
  * 5. Aggregates responses and posts PR comment
  */
 
-import Anthropic from '@anthropic-ai/sdk';
 import {
   createGitHubClient,
   getPRContextFromEnv,
@@ -29,6 +28,7 @@ import {
   formatFindingsAsMarkdown,
   type AgentResult,
 } from './agents/test-quality.js';
+import { createProvider, type ModelProvider } from './lib/providers/index.js';
 
 interface ReviewResult {
   testQuality: AgentResult;
@@ -36,7 +36,7 @@ interface ReviewResult {
 }
 
 async function runReview(
-  anthropic: Anthropic,
+  provider: ModelProvider,
   context: PRContext,
   diff: PRDiff
 ): Promise<ReviewResult> {
@@ -47,7 +47,7 @@ async function runReview(
   // Run Test & Quality agent
   console.log('\n🔍 Running Test & Quality agent...');
   const testQualityResult = await runTestQualityAgent(
-    anthropic,
+    provider,
     diff.files,
     context.title,
     context.body
@@ -85,23 +85,27 @@ function buildReviewComment(result: ReviewResult): string {
 async function main(): Promise<void> {
   // Validate environment
   const githubToken = process.env.GITHUB_TOKEN;
-  const anthropicKey = process.env.ANTHROPIC_API_KEY;
 
   if (!githubToken) {
     throw new Error('GITHUB_TOKEN environment variable is required');
   }
 
-  if (!anthropicKey) {
-    throw new Error('ANTHROPIC_API_KEY environment variable is required');
-  }
-
   // Initialize clients
   const github = createGitHubClient(githubToken);
-  const anthropic = new Anthropic({ apiKey: anthropicKey });
+  const provider = createProvider();
+
+  // Verify provider is available
+  console.log(`\n🚀 AI PR Reviewer starting...`);
+  console.log(`   Model provider: ${provider.name} (${provider.defaultModel})`);
+
+  const providerReady = await provider.healthCheck();
+  if (!providerReady) {
+    throw new Error(`Model provider '${provider.name}' is not available. Check your configuration.`);
+  }
+  console.log(`   Provider health check: OK`);
 
   // Get PR context
   const context = getPRContextFromEnv();
-  console.log(`\n🚀 AI PR Reviewer starting...`);
   console.log(`   Repository: ${context.owner}/${context.repo}`);
   console.log(`   PR #${context.prNumber} by @${context.author}`);
 
@@ -120,7 +124,7 @@ async function main(): Promise<void> {
   }
 
   // Run the review
-  const result = await runReview(anthropic, context, diff);
+  const result = await runReview(provider, context, diff);
 
   // Build and post comment
   const comment = buildReviewComment(result);
