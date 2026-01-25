@@ -13,7 +13,7 @@ env:
   #   qwen2.5-coder:14b  - Best balance of speed/quality (8.4GB) [recommended]
   #   qwen2.5-coder:32b  - Highest quality, slower (18.4GB)
   #   deepseek-coder:6.7b - Legacy fallback (3.5GB)
-  OLLAMA_MODEL: qwen2.5-coder:14b
+  OLLAMA_MODEL: qwen2.5-coder:32b
 
 permissions:
   contents: read
