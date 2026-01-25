@@ -165,6 +165,17 @@ export async function runTestQualityAgent(
   );
   const llmLatencyMs = Math.round(performance.now() - llmStart);
 
+  // Debug logging
+  const debug = process.env.DEBUG_AI_REVIEW === 'true';
+  if (debug) {
+    console.log('\n📝 DEBUG: Raw LLM Response:');
+    console.log('─'.repeat(60));
+    console.log(response.content);
+    console.log('─'.repeat(60));
+    console.log(`Response length: ${response.content.length} chars`);
+    console.log(`Tokens: ${response.usage?.inputTokens} in / ${response.usage?.outputTokens} out\n`);
+  }
+
   // Parse JSON response - handle markdown code blocks and extract valid JSON
   let jsonContent = response.content;
 
@@ -214,9 +225,26 @@ export async function runTestQualityAgent(
 
     try {
       result = JSON.parse(repaired) as AgentResult;
+      if (debug) {
+        console.log('📝 DEBUG: Used repaired JSON');
+      }
     } catch (e) {
+      if (debug) {
+        console.log('📝 DEBUG: JSON repair failed');
+        console.log('Extracted JSON text:', jsonText.substring(0, 500));
+      }
       throw new Error(`Failed to parse agent response as JSON: ${e}`);
     }
+  }
+
+  if (debug) {
+    console.log('📝 DEBUG: Parsed Result:');
+    console.log(`  Findings: ${result.findings?.length || 0}`);
+    result.findings?.forEach((f, i) => {
+      console.log(`    ${i + 1}. [${f.priority}] ${f.file || 'general'}: ${f.message?.substring(0, 100)}`);
+    });
+    console.log(`  Summary: ${result.summary?.substring(0, 100)}`);
+    console.log(`  Confidence: ${result.confidence}`);
   }
 
   const totalLatencyMs = Math.round(performance.now() - totalStart);

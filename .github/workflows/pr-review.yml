@@ -88,6 +88,7 @@ jobs:
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          DEBUG_AI_REVIEW: "true"
         run: node dist/index.js
 
   skip-review:
