@@ -1,0 +1,164 @@
+/**
+ * AI PR Reviewer - Orchestrator
+ *
+ * Main entry point that:
+ * 1. Receives PR context from GitHub Actions
+ * 2. Fetches PR diff via GitHub API
+ * 3. Checks escalation criteria
+ * 4. Routes to specialized subagents
+ * 5. Aggregates responses and posts PR comment
+ */
+
+import Anthropic from '@anthropic-ai/sdk';
+import {
+  createGitHubClient,
+  getPRContextFromEnv,
+  getPRDiff,
+  postReviewComment,
+  addLabels,
+  type PRContext,
+  type PRDiff,
+} from './lib/github.js';
+import {
+  checkEscalation,
+  type PRMetrics,
+  type EscalationResult,
+} from './lib/escalation.js';
+import {
+  runTestQualityAgent,
+  formatFindingsAsMarkdown,
+  type AgentResult,
+} from './agents/test-quality.js';
+
+interface ReviewResult {
+  testQuality: AgentResult;
+  escalation: EscalationResult;
+}
+
+async function runReview(
+  anthropic: Anthropic,
+  context: PRContext,
+  diff: PRDiff
+): Promise<ReviewResult> {
+  console.log(`📋 Reviewing PR #${context.prNumber}: ${context.title}`);
+  console.log(`   Files changed: ${diff.files.length}`);
+  console.log(`   Lines: +${diff.totalAdditions} -${diff.totalDeletions}`);
+
+  // Run Test & Quality agent
+  console.log('\n🔍 Running Test & Quality agent...');
+  const testQualityResult = await runTestQualityAgent(
+    anthropic,
+    diff.files,
+    context.title,
+    context.body
+  );
+  console.log(`   Found ${testQualityResult.findings.length} findings`);
+  console.log(`   Confidence: ${(testQualityResult.confidence * 100).toFixed(0)}%`);
+
+  // Check escalation criteria
+  const metrics: PRMetrics = {
+    filesChanged: diff.files.map((f) => f.filename),
+    linesAdded: diff.totalAdditions,
+    linesRemoved: diff.totalDeletions,
+  };
+
+  const escalation = checkEscalation(metrics, testQualityResult.confidence);
+
+  return {
+    testQuality: testQualityResult,
+    escalation,
+  };
+}
+
+function buildReviewComment(result: ReviewResult): string {
+  let comment = formatFindingsAsMarkdown(result.testQuality);
+
+  // Add escalation notice if needed
+  if (result.escalation.shouldEscalate) {
+    comment += `\n---\n`;
+    comment += `## ⚠️ Human Review Requested\n\n`;
+    comment += `This PR has been flagged for human review:\n`;
+    for (const reason of result.escalation.reasons) {
+      comment += `- ${reason}\n`;
+    }
+    comment += `\n**Severity**: ${result.escalation.severity.toUpperCase()}\n`;
+  }
+
+  comment += `\n---\n`;
+  comment += `*Powered by [AI PR Reviewer](https://github.com/yourusername/ai-pr-reviewer) using Claude*`;
+
+  return comment;
+}
+
+async function main(): Promise<void> {
+  // Validate environment
+  const githubToken = process.env.GITHUB_TOKEN;
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+
+  if (!githubToken) {
+    throw new Error('GITHUB_TOKEN environment variable is required');
+  }
+
+  if (!anthropicKey) {
+    throw new Error('ANTHROPIC_API_KEY environment variable is required');
+  }
+
+  // Initialize clients
+  const github = createGitHubClient(githubToken);
+  const anthropic = new Anthropic({ apiKey: anthropicKey });
+
+  // Get PR context
+  const context = getPRContextFromEnv();
+  console.log(`\n🚀 AI PR Reviewer starting...`);
+  console.log(`   Repository: ${context.owner}/${context.repo}`);
+  console.log(`   PR #${context.prNumber} by @${context.author}`);
+
+  // Fetch PR diff
+  console.log('\n📥 Fetching PR diff...');
+  const diff = await getPRDiff(github, context);
+
+  if (diff.files.length === 0) {
+    console.log('ℹ️  No files changed, nothing to review.');
+    await postReviewComment(
+      github,
+      context,
+      '✅ No code changes to review.'
+    );
+    return;
+  }
+
+  // Run the review
+  const result = await runReview(anthropic, context, diff);
+
+  // Build and post comment
+  const comment = buildReviewComment(result);
+  console.log('\n💬 Posting review comment...');
+  await postReviewComment(github, context, comment);
+
+  // Add labels if escalation needed
+  if (result.escalation.shouldEscalate) {
+    console.log('🏷️  Adding escalation labels...');
+    try {
+      await addLabels(github, context, ['needs-human-review', `severity-${result.escalation.severity}`]);
+    } catch (error) {
+      // Labels might not exist, log but don't fail
+      console.warn('   Could not add labels (they may not exist in the repo)');
+    }
+  }
+
+  console.log('\n✅ Review complete!');
+
+  // Exit with error if critical issues found
+  const criticalFindings = result.testQuality.findings.filter(
+    (f) => f.severity === 'error'
+  );
+  if (criticalFindings.length > 0) {
+    console.log(`\n⚠️  Found ${criticalFindings.length} critical issues`);
+    process.exit(1);
+  }
+}
+
+main().catch((error) => {
+  console.error('❌ Review failed:', error);
+  process.exit(1);
+});

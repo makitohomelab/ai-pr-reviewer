@@ -1,0 +1,22 @@
+# HOMELAB: port=3100 description="AI PR Reviewer MCP" alias=pr-reviewer-mcp
+version: "3.8"
+
+services:
+  pr-reviewer-mcp:
+    build: .
+    container_name: pr-reviewer-mcp
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    volumes:
+      - pr-reviewer-data:/data
+    environment:
+      - DATABASE_PATH=/data/memory.db
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3100/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  pr-reviewer-data:
