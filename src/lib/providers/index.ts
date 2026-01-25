@@ -36,4 +36,4 @@ export function createProvider(): ModelProvider {
 // Re-export types and classes for direct usage if needed
 export { AnthropicProvider } from './anthropic-provider.js';
 export { OllamaProvider } from './ollama-provider.js';
-export type { ModelProvider, ModelCapability, ModelTier } from '../model-provider.js';
+export type { ModelProvider, ModelCapability } from '../model-provider.js';

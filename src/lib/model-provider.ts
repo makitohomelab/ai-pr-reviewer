@@ -30,21 +30,13 @@ export interface ChatCompletionResult {
 }
 
 /**
- * Model tier for routing to different models based on task complexity.
- * - 'fast': Use smaller/cheaper models for simple tasks
- * - 'smart': Use larger/more capable models for complex reasoning
- */
-export type ModelTier = 'fast' | 'smart';
-
-/**
  * Model capability for routing to specialized models based on task type.
- * Extends ModelTier for backward compatibility while enabling fine-grained routing.
  *
  * - 'code-review': Code analysis, bugs, style issues
  * - 'security': Security vulnerability detection
  * - 'reasoning': Complex multi-step reasoning
- * - 'fast': Quick tasks (backward compat, maps to smaller models)
- * - 'smart': Complex tasks (backward compat, maps to larger models)
+ * - 'fast': Quick tasks, maps to smaller/cheaper models
+ * - 'smart': Complex tasks, maps to larger/more capable models
  */
 export type ModelCapability =
   | 'code-review'
