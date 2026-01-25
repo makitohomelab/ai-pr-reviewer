@@ -8,7 +8,12 @@ on:
 env:
   # Ollama inference server (Desktop GPU)
   OLLAMA_BASE_URL: http://192.168.1.189:11434/v1
-  OLLAMA_MODEL: deepseek-coder:6.7b
+  # Available models (change as needed):
+  #   qwen2.5-coder:7b   - Fast, good quality (4.4GB)
+  #   qwen2.5-coder:14b  - Best balance of speed/quality (8.4GB) [recommended]
+  #   qwen2.5-coder:32b  - Highest quality, slower (18.4GB)
+  #   deepseek-coder:6.7b - Legacy fallback (3.5GB)
+  OLLAMA_MODEL: qwen2.5-coder:14b
 
 permissions:
   contents: read
