@@ -73,19 +73,11 @@ async function runReview(
 function buildReviewComment(result: ReviewResult): string {
   let comment = formatFindingsAsMarkdown(result.testQuality);
 
-  // Add escalation notice if needed
+  // Add compact escalation notice if needed
   if (result.escalation.shouldEscalate) {
-    comment += `\n---\n`;
-    comment += `## ⚠️ Human Review Requested\n\n`;
-    comment += `This PR has been flagged for human review:\n`;
-    for (const reason of result.escalation.reasons) {
-      comment += `- ${reason}\n`;
-    }
-    comment += `\n**Severity**: ${result.escalation.severity.toUpperCase()}\n`;
+    const reasons = result.escalation.reasons.join(', ');
+    comment += `\n\n⚠️ **Needs human review** (${result.escalation.severity}): ${reasons}`;
   }
-
-  comment += `\n---\n`;
-  comment += `*Powered by [AI PR Reviewer](https://github.com/yourusername/ai-pr-reviewer) using Claude*`;
 
   return comment;
 }
@@ -150,7 +142,7 @@ async function main(): Promise<void> {
 
   // Exit with error if critical issues found
   const criticalFindings = result.testQuality.findings.filter(
-    (f) => f.severity === 'error'
+    (f) => f.priority === 'critical'
   );
   if (criticalFindings.length > 0) {
     console.log(`\n⚠️  Found ${criticalFindings.length} critical issues`);
