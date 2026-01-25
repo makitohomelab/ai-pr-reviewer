@@ -31,17 +31,9 @@ jobs:
         run: npm run test:run
         continue-on-error: true
 
-      - name: Set test outcome
-        run: |
-          if [ "${{ steps.test.outcome }}" == "success" ]; then
-            echo "Tests passed"
-          else
-            echo "Tests failed - AI review will be skipped"
-          fi
-
   ai-review:
     name: AI Code Review
-    runs-on: ubuntu-latest
+    runs-on: self-hosted  # Uses your homelab runner with Claude Code
     needs: test
     if: needs.test.outputs.tests_passed == 'true'
     steps:
@@ -49,31 +41,76 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "npm"
+      - name: Get PR diff
+        id: diff
+        run: |
+          git diff ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }} > /tmp/pr-diff.patch
+          echo "Files changed:"
+          git diff --name-only ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build
-        run: npm run build
-
-      - name: Run AI Review
+      - name: Run Claude Code Review
+        id: review
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
-          REPO_OWNER: ${{ github.repository_owner }}
-          REPO_NAME: ${{ github.event.repository.name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: node dist/index.js
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Create the review prompt
+          cat > /tmp/review-prompt.md << 'PROMPT_EOF'
+          Review this pull request and provide feedback.
+
+          ## PR Info
+          - Title: ${{ github.event.pull_request.title }}
+          - Author: ${{ github.event.pull_request.user.login }}
+          - Description: ${{ github.event.pull_request.body }}
+
+          ## Task
+          Analyze the code changes and provide:
+          1. **Summary**: Brief overview of the changes
+          2. **Test Coverage**: Are new features adequately tested?
+          3. **Code Quality**: Any code smells or improvements?
+          4. **Potential Issues**: Bugs, edge cases, security concerns?
+          5. **Suggestions**: Constructive improvements
+
+          Be concise and constructive. Focus on significant issues, not style nitpicks.
+
+          Output your review as markdown suitable for a GitHub PR comment.
+          PROMPT_EOF
+
+          # Run Claude Code with the diff
+          cd ${{ github.workspace }}
+
+          # Use Claude Code to review (--print outputs to stdout, -p for prompt)
+          claude --print -p "$(cat /tmp/review-prompt.md)
+
+          Here is the diff to review:
+
+          $(cat /tmp/pr-diff.patch | head -c 50000)" > /tmp/review-output.md
+
+          echo "Review generated"
+
+      - name: Post Review Comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const review = fs.readFileSync('/tmp/review-output.md', 'utf8');
+
+            const body = `## 🤖 AI Code Review
+
+            ${review}
+
+            ---
+            *Reviewed by Claude Code on self-hosted runner*`;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body
+            });
 
   skip-review:
     name: Skip AI Review (Tests Failed)
