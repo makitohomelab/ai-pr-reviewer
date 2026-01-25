@@ -14,6 +14,10 @@ export interface ChatCompletionParams {
   messages: ChatMessage[];
   system?: string;
   maxTokens?: number;
+  /** JSON schema for structured output (Ollama native API) */
+  jsonSchema?: Record<string, unknown>;
+  /** Temperature for generation (0 = deterministic) */
+  temperature?: number;
 }
 
 export interface ChatCompletionResult {

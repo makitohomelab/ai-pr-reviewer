@@ -61,6 +61,12 @@ export interface EscalationResult {
   severity: 'low' | 'medium' | 'high' | 'critical';
 }
 
+export interface SecurityVerdict {
+  verdict: 'pass' | 'fail' | 'partial' | 'skipped';
+  criticalCount: number;
+  highCount: number;
+}
+
 /**
  * Simple glob pattern matching (supports * and **)
  * - ** matches any path segment(s) including none
@@ -143,12 +149,58 @@ export function checkPRSize(
 }
 
 /**
+ * Check if security verdict requires escalation
+ */
+export function checkSecurityEscalation(
+  securityVerdict?: SecurityVerdict
+): { shouldEscalate: boolean; reason?: string; severity: EscalationResult['severity'] } {
+  if (!securityVerdict || securityVerdict.verdict === 'pass') {
+    return { shouldEscalate: false, severity: 'low' };
+  }
+
+  if (securityVerdict.verdict === 'skipped') {
+    return {
+      shouldEscalate: true,
+      reason: 'Security checks were skipped (MCP unavailable)',
+      severity: 'medium',
+    };
+  }
+
+  if (securityVerdict.criticalCount > 0) {
+    return {
+      shouldEscalate: true,
+      reason: `${securityVerdict.criticalCount} critical security issue(s) found`,
+      severity: 'critical',
+    };
+  }
+
+  if (securityVerdict.highCount > 0) {
+    return {
+      shouldEscalate: true,
+      reason: `${securityVerdict.highCount} high severity security issue(s) found`,
+      severity: 'high',
+    };
+  }
+
+  // Partial = some issues but not critical/high
+  if (securityVerdict.verdict === 'partial') {
+    return {
+      shouldEscalate: false,
+      severity: 'medium',
+    };
+  }
+
+  return { shouldEscalate: false, severity: 'low' };
+}
+
+/**
  * Main escalation check - combines all criteria
  */
 export function checkEscalation(
   metrics: PRMetrics,
   agentConfidence?: number,
-  config: EscalationConfig = DEFAULT_CONFIG
+  config: EscalationConfig = DEFAULT_CONFIG,
+  securityVerdict?: SecurityVerdict
 ): EscalationResult {
   const reasons: string[] = [];
   let highestSeverity: EscalationResult['severity'] = 'low';
@@ -174,6 +226,19 @@ export function checkEscalation(
     reasons.push(`Low agent confidence: ${(agentConfidence * 100).toFixed(0)}% (threshold: ${config.minConfidenceScore * 100}%)`);
     if (highestSeverity === 'low') {
       highestSeverity = 'medium';
+    }
+  }
+
+  // Check security verdict
+  if (securityVerdict) {
+    const securityCheck = checkSecurityEscalation(securityVerdict);
+    if (securityCheck.shouldEscalate && securityCheck.reason) {
+      reasons.push(securityCheck.reason);
+      // Update severity based on security findings
+      const severityOrder = ['low', 'medium', 'high', 'critical'];
+      if (severityOrder.indexOf(securityCheck.severity) > severityOrder.indexOf(highestSeverity)) {
+        highestSeverity = securityCheck.severity;
+      }
     }
   }
 

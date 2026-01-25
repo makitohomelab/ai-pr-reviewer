@@ -6,8 +6,8 @@ on:
 
 # Homelab configuration - edit these values for your setup
 env:
-  # Ollama inference server (Desktop GPU)
-  OLLAMA_BASE_URL: http://192.168.1.189:11434/v1
+  # Ollama inference server (Desktop GPU) - uses native API for structured output
+  OLLAMA_BASE_URL: http://192.168.1.189:11434
   # Available models (change as needed):
   #   qwen2.5-coder:7b   - Fast, good quality (4.4GB)
   #   qwen2.5-coder:14b  - Best balance of speed/quality (8.4GB) [recommended]
@@ -20,6 +20,21 @@ permissions:
   pull-requests: write
 
 jobs:
+  check-origin:
+    name: Check PR Origin
+    runs-on: ubuntu-latest
+    outputs:
+      is_fork: ${{ steps.check.outputs.is_fork }}
+    steps:
+      - id: check
+        run: |
+          if [ "${{ github.event.pull_request.head.repo.fork }}" == "true" ]; then
+            echo "is_fork=true" >> $GITHUB_OUTPUT
+            echo "::notice::PR is from a fork - security review will be skipped"
+          else
+            echo "is_fork=false" >> $GITHUB_OUTPUT
+          fi
+
   test:
     name: Run Tests
     runs-on: ubuntu-latest
@@ -45,8 +60,8 @@ jobs:
   ai-review:
     name: AI Code Review
     runs-on: [self-hosted, claude-code]
-    needs: test
-    if: needs.test.outputs.tests_passed == 'true'
+    needs: [check-origin, test]
+    if: needs.test.outputs.tests_passed == 'true' && needs.check-origin.outputs.is_fork != 'true'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -57,10 +72,8 @@ jobs:
 
       - name: Verify Ollama Available
         run: |
-          # Extract base URL without /v1 suffix for health check
-          OLLAMA_API="${OLLAMA_BASE_URL%/v1}"
           for i in {1..10}; do
-            if curl -s --connect-timeout 5 "$OLLAMA_API/api/tags"; then
+            if curl -s --connect-timeout 5 "$OLLAMA_BASE_URL/api/tags"; then
               exit 0
             fi
             sleep 5
@@ -96,10 +109,45 @@ jobs:
           DEBUG_AI_REVIEW: "true"
         run: node dist/index.js
 
+  security-review:
+    name: Security Review
+    runs-on: [self-hosted, claude-code]
+    needs: [check-origin, test]
+    if: needs.test.outputs.tests_passed == 'true' && needs.check-origin.outputs.is_fork != 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Run Security Review
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MCP_BASE_URL: http://100.69.67.78:3100
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO_OWNER: ${{ github.repository_owner }}
+          REPO_NAME: ${{ github.event.repository.name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: node dist/security-review.js
+
   skip-review:
     name: Skip AI Review (Tests Failed)
     runs-on: ubuntu-latest
-    needs: test
+    needs: [check-origin, test]
     if: needs.test.outputs.tests_passed != 'true'
     steps:
       - name: Post skip comment
@@ -111,4 +159,21 @@ jobs:
               repo: context.repo.repo,
               issue_number: context.issue.number,
               body: '⏭️ **AI Review Skipped**\n\nTests failed. Please fix failing tests before AI review runs.'
+            })
+
+  skip-fork-review:
+    name: Skip Review (Fork PR)
+    runs-on: ubuntu-latest
+    needs: check-origin
+    if: needs.check-origin.outputs.is_fork == 'true'
+    steps:
+      - name: Post skip comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: '⏭️ **AI Review Skipped**\n\nThis PR is from a fork. For security reasons, AI review only runs on PRs from the main repository.'
             })

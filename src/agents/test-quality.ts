@@ -2,12 +2,11 @@
  * Test & Quality Agent
  *
  * Specialized subagent that analyzes code changes for:
- * - Test coverage gaps
- * - Code quality issues
- * - Best practice violations
- * - Potential bugs
+ * - Security vulnerabilities
+ * - Breaking changes
+ * - Bugs and test gaps
  *
- * Uses fast tier models for cost efficiency.
+ * Optimized for Qwen 2.5 Coder with structured output.
  */
 
 import type { ModelProvider } from '../lib/model-provider.js';
@@ -69,33 +68,53 @@ export function calculateImportance(files: FileChange[]): PRImportance {
   return 'low';
 }
 
+/**
+ * JSON Schema for structured output.
+ * Ollama constrains generation to match this schema exactly.
+ */
+const RESPONSE_SCHEMA = {
+  type: 'object',
+  properties: {
+    findings: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          priority: { type: 'string', enum: ['critical', 'high', 'medium'] },
+          file: { type: 'string' },
+          line: { type: 'integer' },
+          message: { type: 'string' },
+        },
+        required: ['priority', 'message'],
+      },
+    },
+    summary: { type: 'string' },
+    confidence: { type: 'number' },
+  },
+  required: ['findings', 'summary', 'confidence'],
+};
+
+/**
+ * System prompt optimized for Qwen 2.5 Coder.
+ * - Direct, focused instructions
+ * - Leverages Qwen's code analysis training
+ * - No JSON formatting instructions (schema handles that)
+ */
 function buildSystemPrompt(): string {
-  return `You are a code reviewer focused on finding issues. Look for:
+  return `You are a senior code reviewer. Analyze the diff and report issues.
 
-1. **critical** - Security vulnerabilities: injection, auth bypass, secrets in code, unsafe deserialization
-2. **high** - Breaking changes: API changes, removed features, behavior changes that break callers
-3. **medium** - Bugs and test gaps: null pointer risks, missing error handling, untested code paths
+PRIORITIES:
+- critical: Security vulnerabilities (injection, auth bypass, secrets exposure, unsafe deserialization)
+- high: Breaking changes (API changes, removed exports, behavior changes affecting callers)
+- medium: Bugs (null pointer risks, race conditions, missing error handling, untested paths)
 
-Rules:
-- Return max 5 issues, prioritized by severity
-- Skip style/formatting - only report real problems
-- If no issues found, return empty findings array with high confidence
+RULES:
+- Max 5 issues, most severe first
+- Skip style/formatting issues
+- Be specific: include file path and line number when possible
+- If code looks correct, return empty findings with high confidence
 
-You MUST respond with ONLY this exact JSON structure (no other text):
-{
-  "findings": [
-    {
-      "priority": "critical",
-      "file": "src/example.ts",
-      "line": 42,
-      "message": "SQL injection vulnerability in user input"
-    }
-  ],
-  "summary": "Brief one-line assessment",
-  "confidence": 0.85
-}
-
-IMPORTANT: Each finding MUST have these exact fields: "priority" (critical/high/medium), "file" (string), "line" (number), "message" (string).`;
+Analyze the changes carefully. Focus on what could break or compromise the system.`;
 }
 
 function buildPrompt(files: FileChange[], prTitle: string, prBody: string): string {
@@ -109,17 +128,13 @@ ${f.patch || '(binary or too large)'}
 \`\`\``;
   });
 
-  return `## Pull Request: ${prTitle}
+  return `## PR: ${prTitle}
 
-${prBody || '(No description provided)'}
+${prBody || '(No description)'}
 
-## Files Changed
+## Changed Files
 
-${fileSummaries.join('\n\n')}
-
----
-
-Analyze these changes and provide your findings as JSON.`;
+${fileSummaries.join('\n\n')}`;
 }
 
 export async function runTestQualityAgent(
@@ -160,19 +175,21 @@ export async function runTestQualityAgent(
   const prompt = buildPrompt(truncatedFiles, prTitle, prBody);
   const systemPrompt = buildSystemPrompt();
 
+  const debug = process.env.DEBUG_AI_REVIEW === 'true';
+
   const llmStart = performance.now();
   const response = await provider.chat(
     {
       system: systemPrompt,
       messages: [{ role: 'user', content: prompt }],
-      maxTokens: 4096,
+      maxTokens: 2048,
+      jsonSchema: RESPONSE_SCHEMA,
+      temperature: 0,
     },
     'fast'
   );
   const llmLatencyMs = Math.round(performance.now() - llmStart);
 
-  // Debug logging
-  const debug = process.env.DEBUG_AI_REVIEW === 'true';
   if (debug) {
     console.log('\n📝 DEBUG: Raw LLM Response:');
     console.log('─'.repeat(60));
@@ -182,119 +199,57 @@ export async function runTestQualityAgent(
     console.log(`Tokens: ${response.usage?.inputTokens} in / ${response.usage?.outputTokens} out\n`);
   }
 
-  // Parse JSON response - handle markdown code blocks and extract valid JSON
-  let jsonContent = response.content;
-
-  // Strip markdown code blocks if present
-  const codeBlockMatch = jsonContent.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (codeBlockMatch) {
-    jsonContent = codeBlockMatch[1];
-  }
-
-  // Find the JSON object
-  const jsonMatch = jsonContent.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
-    throw new Error('Failed to parse agent response as JSON');
-  }
-
-  // Extract just the first complete JSON object by balancing braces
-  let jsonText = jsonMatch[0];
-  let depth = 0;
-  let endIndex = 0;
-  for (let i = 0; i < jsonText.length; i++) {
-    if (jsonText[i] === '{') depth++;
-    else if (jsonText[i] === '}') {
-      depth--;
-      if (depth === 0) {
-        endIndex = i + 1;
-        break;
-      }
-    }
-  }
-  if (endIndex > 0) {
-    jsonText = jsonText.substring(0, endIndex);
-  }
-
-  // Try to parse, with fallback to repair common LLM JSON errors
+  // Parse JSON - schema-constrained output should be valid
   let result: AgentResult;
   try {
-    result = JSON.parse(jsonText) as AgentResult;
-  } catch {
-    // Attempt to repair common JSON errors from LLMs
-    let repaired = jsonText
-      // Replace single quotes with double quotes (but not inside strings)
-      .replace(/'/g, '"')
-      // Remove trailing commas before } or ]
-      .replace(/,\s*([}\]])/g, '$1')
-      // Quote unquoted property names
-      .replace(/([{,]\s*)(\w+)(\s*:)/g, '$1"$2"$3');
-
-    try {
-      result = JSON.parse(repaired) as AgentResult;
-      if (debug) {
-        console.log('📝 DEBUG: Used repaired JSON');
-      }
-    } catch (e) {
-      if (debug) {
-        console.log('📝 DEBUG: JSON repair failed');
-        console.log('Extracted JSON text:', jsonText.substring(0, 500));
-      }
-      throw new Error(`Failed to parse agent response as JSON: ${e}`);
+    result = JSON.parse(response.content) as AgentResult;
+  } catch (e) {
+    if (debug) {
+      console.log('📝 DEBUG: JSON parse failed, attempting recovery');
+    }
+    // Fallback: try to extract JSON if model added extra text
+    const jsonMatch = response.content.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      result = JSON.parse(jsonMatch[0]) as AgentResult;
+    } else {
+      throw new Error(`Failed to parse response as JSON: ${e}`);
     }
   }
 
-  // Normalize findings to handle different schemas from different models
-  // Cast to unknown first then to Record to handle varying schemas from LLMs
-  const rawResult = result as unknown as Record<string, unknown>;
-  const rawFindings = rawResult.findings as Record<string, unknown>[] | undefined;
-
-  const normalizedFindings: QualityFinding[] = [];
-  if (Array.isArray(rawFindings)) {
-    for (const f of rawFindings.slice(0, 5)) {
-      // Map severity -> priority, description -> message
-      const priority = (f.priority || f.severity || 'medium') as string;
-      const message = (f.message || f.description || 'No details provided') as string;
-      const validPriority = ['critical', 'high', 'medium'].includes(priority) ? priority : 'medium';
-      const relatedFiles = f.related_files as string[] | undefined;
-
-      normalizedFindings.push({
-        priority: validPriority as 'critical' | 'high' | 'medium',
-        file: (f.file as string) || relatedFiles?.[0],
-        line: f.line as number | undefined,
-        message: String(message),
+  // Validate and normalize findings
+  const findings: QualityFinding[] = [];
+  if (Array.isArray(result.findings)) {
+    for (const f of result.findings.slice(0, 5)) {
+      const priority = ['critical', 'high', 'medium'].includes(f.priority) ? f.priority : 'medium';
+      findings.push({
+        priority: priority as 'critical' | 'high' | 'medium',
+        file: f.file,
+        line: typeof f.line === 'number' ? f.line : undefined,
+        message: String(f.message || 'No details'),
       });
     }
   }
 
-  // Handle summary being an object or string
-  let summaryText = 'Analysis complete.';
-  if (typeof rawResult.summary === 'string') {
-    summaryText = rawResult.summary;
-  } else if (rawResult.summary && typeof rawResult.summary === 'object') {
-    // Convert object summary to text
-    summaryText = JSON.stringify(rawResult.summary);
-  }
-
-  const confidence = typeof rawResult.confidence === 'number'
-    ? Math.min(1, Math.max(0, rawResult.confidence))
-    : 0.5;
+  const summary = typeof result.summary === 'string' ? result.summary : 'Analysis complete.';
+  const confidence = typeof result.confidence === 'number'
+    ? Math.min(1, Math.max(0, result.confidence))
+    : 0.8;
 
   if (debug) {
     console.log('📝 DEBUG: Parsed Result:');
-    console.log(`  Findings: ${normalizedFindings.length}`);
-    normalizedFindings.forEach((f, i) => {
+    console.log(`  Findings: ${findings.length}`);
+    findings.forEach((f, i) => {
       console.log(`    ${i + 1}. [${f.priority}] ${f.file || 'general'}: ${f.message?.substring(0, 100)}`);
     });
-    console.log(`  Summary: ${summaryText.substring(0, 100)}`);
-    console.log(`  Confidence: ${rawResult.confidence}`);
+    console.log(`  Summary: ${summary.substring(0, 100)}`);
+    console.log(`  Confidence: ${confidence}`);
   }
 
   const totalLatencyMs = Math.round(performance.now() - totalStart);
 
-  // Validate and sanitize
   return {
-    findings: normalizedFindings,
-    summary: summaryText,
+    findings,
+    summary,
     confidence,
     benchmark: {
       llmLatencyMs,
@@ -310,12 +265,6 @@ export async function runTestQualityAgent(
  * Format agent findings as a GitHub-flavored markdown comment
  */
 export function formatFindingsAsMarkdown(result: AgentResult): string {
-  const priorityLabel = {
-    critical: 'Security',
-    high: 'Breaking',
-    medium: 'Tests/Quality',
-  };
-
   let md = `## AI Review\n\n`;
 
   // Group findings by priority
