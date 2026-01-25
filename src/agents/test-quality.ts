@@ -70,26 +70,32 @@ export function calculateImportance(files: FileChange[]): PRImportance {
 }
 
 function buildSystemPrompt(): string {
-  return `You are a focused code reviewer. Analyze changes in priority order:
+  return `You are a code reviewer focused on finding issues. Look for:
 
-1. **critical** - Security issues: injection, auth bypass, secrets exposure, unsafe deserialization
-2. **high** - Breaking changes: API signature changes, removed functionality, behavior changes
-3. **medium** - Test gaps and blocking quality issues: untested new code paths, obvious bugs
+1. **critical** - Security vulnerabilities: injection, auth bypass, secrets in code, unsafe deserialization
+2. **high** - Breaking changes: API changes, removed features, behavior changes that break callers
+3. **medium** - Bugs and test gaps: null pointer risks, missing error handling, untested code paths
 
 Rules:
-- Return max 5 findings, highest priority first
-- Skip style/formatting issues entirely
-- Only report issues you're confident about
-- Be thorough in your explanations
+- Return max 5 issues, prioritized by severity
+- Skip style/formatting - only report real problems
+- If no issues found, return empty findings array with high confidence
 
-Respond with JSON:
+You MUST respond with ONLY this exact JSON structure (no other text):
 {
   "findings": [
-    {"priority": "critical"|"high"|"medium", "file": "path.ts", "line": 42, "message": "Detailed explanation of the issue"}
+    {
+      "priority": "critical",
+      "file": "src/example.ts",
+      "line": 42,
+      "message": "SQL injection vulnerability in user input"
+    }
   ],
-  "summary": "Assessment of the changes",
+  "summary": "Brief one-line assessment",
   "confidence": 0.85
-}`;
+}
+
+IMPORTANT: Each finding MUST have these exact fields: "priority" (critical/high/medium), "file" (string), "line" (number), "message" (string).`;
 }
 
 function buildPrompt(files: FileChange[], prTitle: string, prBody: string): string {
