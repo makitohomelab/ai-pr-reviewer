@@ -180,29 +180,42 @@ export async function runTestQualityAgent(
     throw new Error('Failed to parse agent response as JSON');
   }
 
-  // Try to parse, extracting just the first complete JSON object if there's trailing content
-  let result: AgentResult;
-  try {
-    result = JSON.parse(jsonMatch[0]) as AgentResult;
-  } catch {
-    // If parsing fails, try to find a valid JSON by balancing braces
-    const text = jsonMatch[0];
-    let depth = 0;
-    let endIndex = 0;
-    for (let i = 0; i < text.length; i++) {
-      if (text[i] === '{') depth++;
-      else if (text[i] === '}') {
-        depth--;
-        if (depth === 0) {
-          endIndex = i + 1;
-          break;
-        }
+  // Extract just the first complete JSON object by balancing braces
+  let jsonText = jsonMatch[0];
+  let depth = 0;
+  let endIndex = 0;
+  for (let i = 0; i < jsonText.length; i++) {
+    if (jsonText[i] === '{') depth++;
+    else if (jsonText[i] === '}') {
+      depth--;
+      if (depth === 0) {
+        endIndex = i + 1;
+        break;
       }
     }
-    if (endIndex > 0) {
-      result = JSON.parse(text.substring(0, endIndex)) as AgentResult;
-    } else {
-      throw new Error('Failed to parse agent response as JSON');
+  }
+  if (endIndex > 0) {
+    jsonText = jsonText.substring(0, endIndex);
+  }
+
+  // Try to parse, with fallback to repair common LLM JSON errors
+  let result: AgentResult;
+  try {
+    result = JSON.parse(jsonText) as AgentResult;
+  } catch {
+    // Attempt to repair common JSON errors from LLMs
+    let repaired = jsonText
+      // Replace single quotes with double quotes (but not inside strings)
+      .replace(/'/g, '"')
+      // Remove trailing commas before } or ]
+      .replace(/,\s*([}\]])/g, '$1')
+      // Quote unquoted property names
+      .replace(/([{,]\s*)(\w+)(\s*:)/g, '$1"$2"$3');
+
+    try {
+      result = JSON.parse(repaired) as AgentResult;
+    } catch (e) {
+      throw new Error(`Failed to parse agent response as JSON: ${e}`);
     }
   }
 
