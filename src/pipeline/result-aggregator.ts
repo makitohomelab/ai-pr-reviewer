@@ -1,0 +1,213 @@
+/**
+ * Result Aggregator
+ *
+ * Aggregates and formats findings from multiple agents,
+ * deduplicating and prioritizing for the final PR comment.
+ */
+
+import type { AgentFinding, AgentOutput } from '../agents/base-agent.js';
+import type { PipelineResult } from './pipeline-orchestrator.js';
+
+/**
+ * Aggregated review result.
+ */
+export interface AggregatedResult {
+  /** Deduplicated findings */
+  findings: AgentFinding[];
+  /** Summary for PR comment */
+  summary: string;
+  /** Overall confidence */
+  confidence: number;
+  /** Whether escalation is recommended */
+  shouldEscalate: boolean;
+  /** Reasons for escalation */
+  escalationReasons: string[];
+}
+
+/**
+ * Deduplicate findings that are semantically similar.
+ */
+function deduplicateFindings(findings: AgentFinding[]): AgentFinding[] {
+  const seen = new Map<string, AgentFinding>();
+
+  for (const finding of findings) {
+    // Create a key based on file, line, and message similarity
+    const key = [
+      finding.file || 'general',
+      finding.line?.toString() || '',
+      finding.message.toLowerCase().substring(0, 50),
+    ].join('|');
+
+    const existing = seen.get(key);
+    if (!existing) {
+      seen.set(key, finding);
+    } else {
+      // Keep the higher priority finding
+      const priorityOrder = { critical: 0, high: 1, medium: 2 };
+      if (priorityOrder[finding.priority] < priorityOrder[existing.priority]) {
+        seen.set(key, finding);
+      }
+    }
+  }
+
+  return Array.from(seen.values());
+}
+
+/**
+ * Sort findings by priority and file.
+ */
+function sortFindings(findings: AgentFinding[]): AgentFinding[] {
+  const priorityOrder = { critical: 0, high: 1, medium: 2 };
+
+  return [...findings].sort((a, b) => {
+    // First by priority
+    const priorityDiff = priorityOrder[a.priority] - priorityOrder[b.priority];
+    if (priorityDiff !== 0) return priorityDiff;
+
+    // Then by file
+    const fileA = a.file || '';
+    const fileB = b.file || '';
+    return fileA.localeCompare(fileB);
+  });
+}
+
+/**
+ * Determine if escalation to human review is needed.
+ */
+function checkEscalation(
+  findings: AgentFinding[],
+  agentOutputs: AgentOutput[]
+): { shouldEscalate: boolean; reasons: string[] } {
+  const reasons: string[] = [];
+
+  // Check for critical findings
+  const criticalCount = findings.filter(
+    (f) => f.priority === 'critical'
+  ).length;
+  if (criticalCount > 0) {
+    reasons.push(`${criticalCount} critical issue(s) detected`);
+  }
+
+  // Check for low confidence
+  const lowConfidenceAgents = agentOutputs.filter((o) => o.confidence < 0.5);
+  if (lowConfidenceAgents.length > 0) {
+    reasons.push(
+      `Low confidence from: ${lowConfidenceAgents.map((o) => o.agent).join(', ')}`
+    );
+  }
+
+  // Check for security findings
+  const securityFindings = findings.filter(
+    (f) => f.agent === 'security' && f.priority !== 'medium'
+  );
+  if (securityFindings.length > 0) {
+    reasons.push(`${securityFindings.length} security concern(s)`);
+  }
+
+  return {
+    shouldEscalate: reasons.length > 0,
+    reasons,
+  };
+}
+
+/**
+ * Aggregate pipeline results into final format.
+ */
+export function aggregateResults(result: PipelineResult): AggregatedResult {
+  // Deduplicate and sort findings
+  const deduplicated = deduplicateFindings(result.findings);
+  const sorted = sortFindings(deduplicated);
+
+  // Limit to top findings
+  const topFindings = sorted.slice(0, 10);
+
+  // Check escalation
+  const { shouldEscalate, reasons } = checkEscalation(
+    result.findings,
+    result.agentOutputs
+  );
+
+  return {
+    findings: topFindings,
+    summary: result.summary,
+    confidence: result.confidence,
+    shouldEscalate,
+    escalationReasons: reasons,
+  };
+}
+
+/**
+ * Format aggregated results as GitHub-flavored markdown.
+ */
+export function formatAsMarkdown(result: AggregatedResult): string {
+  const sections: string[] = [];
+
+  // Header
+  sections.push('## AI Review');
+
+  // Agent summaries
+  sections.push(result.summary);
+
+  // Findings
+  if (result.findings.length > 0) {
+    sections.push('### Issues Found\n');
+
+    for (const finding of result.findings) {
+      const icon =
+        finding.priority === 'critical'
+          ? '🔴'
+          : finding.priority === 'high'
+            ? '🟠'
+            : '🟡';
+
+      const location = finding.file
+        ? ` in \`${finding.file}${finding.line ? `:${finding.line}` : ''}\``
+        : '';
+
+      let line = `${icon} **[${finding.agent}/${finding.category}]** ${finding.message}${location}`;
+
+      if (finding.suggestion) {
+        line += `\n   💡 *Suggestion: ${finding.suggestion}*`;
+      }
+
+      sections.push(line);
+    }
+  } else {
+    sections.push('✅ No issues detected across all review areas.');
+  }
+
+  // Escalation notice
+  if (result.shouldEscalate) {
+    const reasons = result.escalationReasons.join(', ');
+    sections.push(`\n---\n⚠️ **Needs human review**: ${reasons}`);
+  }
+
+  // Footer
+  sections.push(`\n---`);
+  sections.push(`Confidence: ${(result.confidence * 100).toFixed(0)}%`);
+
+  return sections.join('\n\n');
+}
+
+/**
+ * Format as compact summary (for logging or brief display).
+ */
+export function formatAsCompactSummary(result: AggregatedResult): string {
+  const critical = result.findings.filter(
+    (f) => f.priority === 'critical'
+  ).length;
+  const high = result.findings.filter((f) => f.priority === 'high').length;
+  const medium = result.findings.filter((f) => f.priority === 'medium').length;
+
+  const parts: string[] = [];
+
+  if (critical > 0) parts.push(`🔴 ${critical} critical`);
+  if (high > 0) parts.push(`🟠 ${high} high`);
+  if (medium > 0) parts.push(`🟡 ${medium} medium`);
+
+  if (parts.length === 0) {
+    return '✅ No issues found';
+  }
+
+  return parts.join(', ');
+}

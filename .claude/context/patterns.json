@@ -1,0 +1,65 @@
+{
+  "version": "1.0",
+  "patterns": [
+    {
+      "id": "provider-abstraction",
+      "type": "architecture",
+      "description": "All LLM calls must use ModelProvider interface, not direct API calls",
+      "files": ["src/**/*.ts"],
+      "antiPattern": "fetch.*ollama|fetch.*anthropic|fetch.*api\\/chat",
+      "weight": 1.0
+    },
+    {
+      "id": "capability-routing",
+      "type": "architecture",
+      "description": "Use ModelCapability enum for model selection, not hardcoded model names",
+      "files": ["src/agents/**/*.ts", "src/pipeline/**/*.ts"],
+      "antiPattern": "qwen2\\.5|llama|claude-3",
+      "weight": 0.9
+    },
+    {
+      "id": "structured-output-schema",
+      "type": "convention",
+      "description": "Agents must define RESPONSE_SCHEMA constant for structured JSON output",
+      "files": ["src/agents/**/*.ts"],
+      "weight": 0.8
+    },
+    {
+      "id": "token-budget",
+      "type": "convention",
+      "description": "Apply token budget before sending prompts to LLM",
+      "files": ["src/agents/**/*.ts", "src/pipeline/**/*.ts"],
+      "weight": 0.7
+    },
+    {
+      "id": "env-secrets",
+      "type": "security",
+      "description": "Environment variables may contain secrets - never log them",
+      "files": ["**/*.ts", ".github/**/*.yml"],
+      "antiPattern": "console\\.log.*process\\.env|console\\.log.*API_KEY|console\\.log.*TOKEN",
+      "weight": 1.0
+    },
+    {
+      "id": "error-handling",
+      "type": "convention",
+      "description": "Wrap provider.chat() calls in try/catch for network error handling",
+      "files": ["src/agents/**/*.ts", "src/pipeline/**/*.ts"],
+      "weight": 0.6
+    },
+    {
+      "id": "agent-base-class",
+      "type": "architecture",
+      "description": "New agents must extend BaseAgent and implement required methods",
+      "files": ["src/agents/**/*.ts"],
+      "weight": 0.8
+    },
+    {
+      "id": "workflow-secrets",
+      "type": "security",
+      "description": "GitHub Actions workflow secrets must use secrets context",
+      "files": [".github/workflows/**/*.yml"],
+      "antiPattern": "GITHUB_TOKEN.*=.*['\"][^$]",
+      "weight": 1.0
+    }
+  ]
+}
