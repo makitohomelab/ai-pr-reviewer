@@ -86,6 +86,29 @@ describe('calculateSimilarity', () => {
     expect(similarity).toBeGreaterThan(0.6);
   });
 
+  it('differentiates same message in different categories', () => {
+    const a: AgentFinding = {
+      agent: 'security',
+      priority: 'high',
+      category: 'sql-injection',
+      file: 'src/db.ts',
+      message: 'Issue detected',
+    };
+
+    const b: AgentFinding = {
+      agent: 'performance',
+      priority: 'medium',
+      category: 'n-plus-one',
+      file: 'src/db.ts',
+      message: 'Issue detected',
+    };
+
+    const similarity = calculateSimilarity(a, b);
+    // Same file, same message, different categories: 0.5 + 0.3 + 0 = 0.8
+    // At threshold boundary - validates that category affects scoring
+    expect(similarity).toBe(0.8);
+  });
+
   it('handles very long messages by truncating', () => {
     const longMessage = 'A'.repeat(500);
     const a: AgentFinding = {
@@ -215,6 +238,7 @@ describe('deduplicateFindings', () => {
 
   describe('env var threshold', () => {
     const originalEnv = process.env.DEDUP_THRESHOLD;
+    const consoleWarn = console.warn;
 
     afterEach(() => {
       if (originalEnv === undefined) {
@@ -222,6 +246,7 @@ describe('deduplicateFindings', () => {
       } else {
         process.env.DEDUP_THRESHOLD = originalEnv;
       }
+      console.warn = consoleWarn;
     });
 
     it('respects DEDUP_THRESHOLD env var', () => {
@@ -246,6 +271,58 @@ describe('deduplicateFindings', () => {
 
       const result = deduplicateFindings(findings);
       expect(result).toHaveLength(2);
+    });
+
+    it('falls back to default for invalid env var', () => {
+      console.warn = () => {}; // Suppress warning in test
+      process.env.DEDUP_THRESHOLD = 'invalid';
+
+      const findings: AgentFinding[] = [
+        {
+          agent: 'security',
+          priority: 'high',
+          category: 'sql-injection',
+          file: 'src/db.ts',
+          message: 'SQL injection detected',
+        },
+        {
+          agent: 'security',
+          priority: 'high',
+          category: 'sql-injection',
+          file: 'src/db.ts',
+          message: 'SQL injection vulnerability detected',
+        },
+      ];
+
+      // Should use default threshold (0.8) and dedupe similar findings
+      const result = deduplicateFindings(findings);
+      expect(result).toHaveLength(1);
+    });
+
+    it('rejects out-of-range threshold values', () => {
+      console.warn = () => {}; // Suppress warning in test
+      process.env.DEDUP_THRESHOLD = '1.5'; // Invalid: > 1
+
+      const findings: AgentFinding[] = [
+        {
+          agent: 'security',
+          priority: 'high',
+          category: 'sql-injection',
+          file: 'src/db.ts',
+          message: 'SQL injection detected',
+        },
+        {
+          agent: 'security',
+          priority: 'high',
+          category: 'sql-injection',
+          file: 'src/db.ts',
+          message: 'SQL injection vulnerability detected',
+        },
+      ];
+
+      // Should use default threshold (0.8) and dedupe similar findings
+      const result = deduplicateFindings(findings);
+      expect(result).toHaveLength(1);
     });
   });
 
@@ -282,6 +359,14 @@ describe('deduplicateFindings', () => {
 });
 
 describe('deduplicateFindingsWithStats', () => {
+  it('handles empty array', () => {
+    const { findings, stats } = deduplicateFindingsWithStats([]);
+    expect(findings).toEqual([]);
+    expect(stats.inputCount).toBe(0);
+    expect(stats.outputCount).toBe(0);
+    expect(stats.duplicatesRemoved).toBe(0);
+  });
+
   it('returns findings and statistics', () => {
     const findings: AgentFinding[] = [
       {

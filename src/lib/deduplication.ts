@@ -15,6 +15,27 @@ const MAX_MESSAGE_LENGTH = 200;
 const DEFAULT_THRESHOLD = 0.8;
 
 /**
+ * Parse and validate threshold from env var.
+ * Returns undefined if invalid, so caller can fall back to default.
+ */
+function parseThresholdFromEnv(): number | undefined {
+  const envValue = process.env.DEDUP_THRESHOLD;
+  if (!envValue) return undefined;
+
+  const parsed = parseFloat(envValue);
+
+  // Validate: must be a number between 0 and 1 (exclusive of 0, inclusive of 1)
+  if (Number.isNaN(parsed) || parsed <= 0 || parsed > 1) {
+    console.warn(
+      `Invalid DEDUP_THRESHOLD env var "${envValue}". Must be a number between 0 and 1. Using default: ${DEFAULT_THRESHOLD}`
+    );
+    return undefined;
+  }
+
+  return parsed;
+}
+
+/**
  * Deduplication statistics for debugging/logging.
  */
 export interface DeduplicationStats {
@@ -226,8 +247,7 @@ export function deduplicateFindings(
 ): AgentFinding[] {
   if (findings.length === 0) return [];
 
-  const threshold = options?.threshold
-    ?? (parseFloat(process.env.DEDUP_THRESHOLD || '') || DEFAULT_THRESHOLD);
+  const threshold = options?.threshold ?? parseThresholdFromEnv() ?? DEFAULT_THRESHOLD;
 
   const priorityOrder = { critical: 0, high: 1, medium: 2 };
 
@@ -261,8 +281,7 @@ export function deduplicateFindingsWithStats(
   findings: AgentFinding[],
   options?: { threshold?: number }
 ): { findings: AgentFinding[]; stats: DeduplicationStats } {
-  const threshold = options?.threshold
-    ?? (parseFloat(process.env.DEDUP_THRESHOLD || '') || DEFAULT_THRESHOLD);
+  const threshold = options?.threshold ?? parseThresholdFromEnv() ?? DEFAULT_THRESHOLD;
 
   const deduplicated = deduplicateFindings(findings, { threshold });
 
