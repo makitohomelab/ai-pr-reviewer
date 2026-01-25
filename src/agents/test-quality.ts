@@ -211,7 +211,7 @@ export async function runTestQualityAgent(
       jsonSchema: RESPONSE_SCHEMA,
       temperature: 0,
     },
-    'fast'
+    'code-review'
   );
   const llmLatencyMs = Math.round(performance.now() - llmStart);
 
@@ -296,7 +296,7 @@ export async function runTestQualityAgent(
       totalLatencyMs,
       inputTokens: response.usage?.inputTokens,
       outputTokens: response.usage?.outputTokens,
-      model: provider.getModelName('fast'),
+      model: provider.getModelName('code-review'),
     },
   };
 }

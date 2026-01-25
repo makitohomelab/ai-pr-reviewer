@@ -10,7 +10,7 @@ import type {
   ModelProvider,
   ChatCompletionParams,
   ChatCompletionResult,
-  ModelTier,
+  ModelCapability,
 } from '../model-provider.js';
 
 interface OllamaConfig {
@@ -18,6 +18,9 @@ interface OllamaConfig {
   model?: string; // backward compat, sets both fast and smart
   fastModel?: string;
   smartModel?: string;
+  codeReviewModel?: string;
+  securityModel?: string;
+  reasoningModel?: string;
 }
 
 interface OllamaChatMessage {
@@ -51,8 +54,7 @@ export class OllamaProvider implements ModelProvider {
   readonly name = 'ollama';
   readonly defaultModel: string;
   private readonly baseUrl: string;
-  private readonly fastModel: string;
-  private readonly smartModel: string;
+  private readonly modelMap: Map<ModelCapability, string>;
 
   constructor(config?: Partial<OllamaConfig>) {
     // Strip /v1 suffix if present (migrating from OpenAI-compatible URL)
@@ -60,15 +62,26 @@ export class OllamaProvider implements ModelProvider {
     baseUrl = baseUrl.replace(/\/v1\/?$/, '');
     this.baseUrl = baseUrl;
 
-    // Support single model (backward compat) or separate fast/smart models
+    // Support single model (backward compat) or separate models per capability
     const defaultModel = config?.model || process.env.OLLAMA_MODEL || 'qwen2.5-coder:32b';
-    this.fastModel = config?.fastModel || process.env.OLLAMA_FAST_MODEL || defaultModel;
-    this.smartModel = config?.smartModel || process.env.OLLAMA_SMART_MODEL || defaultModel;
-    this.defaultModel = this.fastModel;
+    const fastModel = config?.fastModel || process.env.OLLAMA_FAST_MODEL || defaultModel;
+    const smartModel = config?.smartModel || process.env.OLLAMA_SMART_MODEL || defaultModel;
+
+    // Build capability-to-model mapping
+    // Specialized capabilities fall back to fast/smart if not explicitly configured
+    this.modelMap = new Map<ModelCapability, string>([
+      ['fast', fastModel],
+      ['smart', smartModel],
+      ['code-review', config?.codeReviewModel || process.env.OLLAMA_CODE_REVIEW_MODEL || fastModel],
+      ['security', config?.securityModel || process.env.OLLAMA_SECURITY_MODEL || fastModel],
+      ['reasoning', config?.reasoningModel || process.env.OLLAMA_REASONING_MODEL || smartModel],
+    ]);
+
+    this.defaultModel = fastModel;
   }
 
-  async chat(params: ChatCompletionParams, tier: ModelTier = 'fast'): Promise<ChatCompletionResult> {
-    const model = tier === 'smart' ? this.smartModel : this.fastModel;
+  async chat(params: ChatCompletionParams, capability: ModelCapability = 'fast'): Promise<ChatCompletionResult> {
+    const model = this.modelMap.get(capability) || this.defaultModel;
     const messages: OllamaChatMessage[] = [];
 
     // Add system message if provided
@@ -146,7 +159,7 @@ export class OllamaProvider implements ModelProvider {
     }
   }
 
-  getModelName(tier: ModelTier): string {
-    return tier === 'smart' ? this.smartModel : this.fastModel;
+  getModelName(capability: ModelCapability): string {
+    return this.modelMap.get(capability) || this.defaultModel;
   }
 }

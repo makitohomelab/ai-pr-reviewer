@@ -10,21 +10,23 @@ import type {
   ModelProvider,
   ChatCompletionParams,
   ChatCompletionResult,
-  ModelTier,
+  ModelCapability,
 } from '../model-provider.js';
 
 interface AnthropicConfig {
   apiKey?: string;
   fastModel?: string;
   smartModel?: string;
+  codeReviewModel?: string;
+  securityModel?: string;
+  reasoningModel?: string;
 }
 
 export class AnthropicProvider implements ModelProvider {
   readonly name = 'anthropic';
   readonly defaultModel: string;
   private readonly client: Anthropic;
-  private readonly fastModel: string;
-  private readonly smartModel: string;
+  private readonly modelMap: Map<ModelCapability, string>;
 
   constructor(config?: AnthropicConfig) {
     const apiKey = config?.apiKey || process.env.ANTHROPIC_API_KEY;
@@ -33,13 +35,25 @@ export class AnthropicProvider implements ModelProvider {
     }
 
     this.client = new Anthropic({ apiKey });
-    this.fastModel = config?.fastModel || process.env.ANTHROPIC_FAST_MODEL || 'claude-3-5-haiku-20241022';
-    this.smartModel = config?.smartModel || process.env.ANTHROPIC_SMART_MODEL || 'claude-sonnet-4-20250514';
-    this.defaultModel = this.fastModel;
+
+    const fastModel = config?.fastModel || process.env.ANTHROPIC_FAST_MODEL || 'claude-3-5-haiku-20241022';
+    const smartModel = config?.smartModel || process.env.ANTHROPIC_SMART_MODEL || 'claude-sonnet-4-20250514';
+
+    // Build capability-to-model mapping
+    // Specialized capabilities fall back to fast/smart if not explicitly configured
+    this.modelMap = new Map<ModelCapability, string>([
+      ['fast', fastModel],
+      ['smart', smartModel],
+      ['code-review', config?.codeReviewModel || process.env.ANTHROPIC_CODE_REVIEW_MODEL || fastModel],
+      ['security', config?.securityModel || process.env.ANTHROPIC_SECURITY_MODEL || smartModel],
+      ['reasoning', config?.reasoningModel || process.env.ANTHROPIC_REASONING_MODEL || smartModel],
+    ]);
+
+    this.defaultModel = fastModel;
   }
 
-  async chat(params: ChatCompletionParams, tier: ModelTier = 'fast'): Promise<ChatCompletionResult> {
-    const model = tier === 'smart' ? this.smartModel : this.fastModel;
+  async chat(params: ChatCompletionParams, capability: ModelCapability = 'fast'): Promise<ChatCompletionResult> {
+    const model = this.modelMap.get(capability) || this.defaultModel;
 
     const messages: Anthropic.MessageParam[] = params.messages.map((msg) => ({
       role: msg.role === 'system' ? 'user' : msg.role,
@@ -72,7 +86,7 @@ export class AnthropicProvider implements ModelProvider {
     try {
       // Send a minimal request to verify API key works
       await this.client.messages.create({
-        model: this.fastModel,
+        model: this.defaultModel,
         max_tokens: 1,
         messages: [{ role: 'user', content: 'hi' }],
       });
@@ -82,7 +96,7 @@ export class AnthropicProvider implements ModelProvider {
     }
   }
 
-  getModelName(tier: ModelTier): string {
-    return tier === 'smart' ? this.smartModel : this.fastModel;
+  getModelName(capability: ModelCapability): string {
+    return this.modelMap.get(capability) || this.defaultModel;
   }
 }

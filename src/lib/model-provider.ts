@@ -37,6 +37,23 @@ export interface ChatCompletionResult {
 export type ModelTier = 'fast' | 'smart';
 
 /**
+ * Model capability for routing to specialized models based on task type.
+ * Extends ModelTier for backward compatibility while enabling fine-grained routing.
+ *
+ * - 'code-review': Code analysis, bugs, style issues
+ * - 'security': Security vulnerability detection
+ * - 'reasoning': Complex multi-step reasoning
+ * - 'fast': Quick tasks (backward compat, maps to smaller models)
+ * - 'smart': Complex tasks (backward compat, maps to larger models)
+ */
+export type ModelCapability =
+  | 'code-review'
+  | 'security'
+  | 'reasoning'
+  | 'fast'
+  | 'smart';
+
+/**
  * Common interface for all LLM providers.
  */
 export interface ModelProvider {
@@ -49,9 +66,9 @@ export interface ModelProvider {
   /**
    * Send a chat completion request.
    * @param params - Chat parameters (messages, system prompt, etc.)
-   * @param tier - Optional model tier for routing (defaults to 'fast')
+   * @param capability - Optional model capability for routing (defaults to 'fast')
    */
-  chat(params: ChatCompletionParams, tier?: ModelTier): Promise<ChatCompletionResult>;
+  chat(params: ChatCompletionParams, capability?: ModelCapability): Promise<ChatCompletionResult>;
 
   /**
    * Check if the provider is available and configured correctly.
@@ -60,9 +77,9 @@ export interface ModelProvider {
   healthCheck(): Promise<boolean>;
 
   /**
-   * Get the model name for a given tier.
-   * @param tier - Model tier
+   * Get the model name for a given capability.
+   * @param capability - Model capability
    * @returns The model name/identifier
    */
-  getModelName(tier: ModelTier): string;
+  getModelName(capability: ModelCapability): string;
 }

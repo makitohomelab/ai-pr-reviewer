@@ -8,12 +8,18 @@ on:
 env:
   # Ollama inference server (Desktop GPU) - uses native API for structured output
   OLLAMA_BASE_URL: http://192.168.1.189:11434
-  # Available models (change as needed):
-  #   qwen2.5-coder:7b   - Fast, good quality (4.4GB)
-  #   qwen2.5-coder:14b  - Best balance of speed/quality (8.4GB) [recommended]
-  #   qwen2.5-coder:32b  - Highest quality, slower (18.4GB)
-  #   deepseek-coder:6.7b - Legacy fallback (3.5GB)
+
+  # Default model (backward compat - used if capability-specific models not set)
   OLLAMA_MODEL: qwen2.5-coder:32b
+
+  # Capability-specific models (optional - override for specialized tasks)
+  # Available models:
+  #   qwen2.5-coder:7b   - Fast, good quality (4.4GB)
+  #   qwen2.5-coder:14b  - Best balance of speed/quality (8.4GB)
+  #   qwen2.5-coder:32b  - Highest quality, slower (18.4GB)
+  OLLAMA_CODE_REVIEW_MODEL: qwen2.5-coder:32b
+  # OLLAMA_SECURITY_MODEL: qwen2.5-coder:14b  # For future security agent
+  # OLLAMA_REASONING_MODEL: qwen2.5-coder:32b  # For complex reasoning tasks
 
 permissions:
   contents: read
@@ -98,6 +104,7 @@ jobs:
           MODEL_PROVIDER: ollama
           OLLAMA_BASE_URL: ${{ env.OLLAMA_BASE_URL }}
           OLLAMA_MODEL: ${{ env.OLLAMA_MODEL }}
+          OLLAMA_CODE_REVIEW_MODEL: ${{ env.OLLAMA_CODE_REVIEW_MODEL }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO_OWNER: ${{ github.repository_owner }}
           REPO_NAME: ${{ github.event.repository.name }}
@@ -108,41 +115,6 @@ jobs:
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           DEBUG_AI_REVIEW: "true"
         run: node dist/index.js
-
-  security-review:
-    name: Security Review
-    runs-on: [self-hosted, claude-code]
-    needs: [check-origin, test]
-    if: needs.test.outputs.tests_passed == 'true' && needs.check-origin.outputs.is_fork != 'true'
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "npm"
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build
-        run: npm run build
-
-      - name: Run Security Review
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          MCP_BASE_URL: http://100.69.67.78:3100
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          REPO_OWNER: ${{ github.repository_owner }}
-          REPO_NAME: ${{ github.event.repository.name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
-        run: node dist/security-review.js
 
   skip-review:
     name: Skip AI Review (Tests Failed)
