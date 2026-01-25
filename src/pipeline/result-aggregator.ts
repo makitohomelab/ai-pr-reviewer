@@ -7,6 +7,7 @@
 
 import type { AgentFinding, AgentOutput } from '../agents/base-agent.js';
 import type { PipelineResult } from './pipeline-orchestrator.js';
+import { deduplicateFindings } from '../lib/deduplication.js';
 
 /**
  * Aggregated review result.
@@ -24,34 +25,7 @@ export interface AggregatedResult {
   escalationReasons: string[];
 }
 
-/**
- * Deduplicate findings that are semantically similar.
- */
-function deduplicateFindings(findings: AgentFinding[]): AgentFinding[] {
-  const seen = new Map<string, AgentFinding>();
-
-  for (const finding of findings) {
-    // Create a key based on file, line, and message similarity
-    const key = [
-      finding.file || 'general',
-      finding.line?.toString() || '',
-      finding.message.toLowerCase().substring(0, 50),
-    ].join('|');
-
-    const existing = seen.get(key);
-    if (!existing) {
-      seen.set(key, finding);
-    } else {
-      // Keep the higher priority finding
-      const priorityOrder = { critical: 0, high: 1, medium: 2 };
-      if (priorityOrder[finding.priority] < priorityOrder[existing.priority]) {
-        seen.set(key, finding);
-      }
-    }
-  }
-
-  return Array.from(seen.values());
-}
+// Deduplication now handled by src/lib/deduplication.ts
 
 /**
  * Sort findings by priority and file.
