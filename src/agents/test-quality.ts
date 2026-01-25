@@ -243,23 +243,59 @@ export async function runTestQualityAgent(
     }
   }
 
+  // Normalize findings to handle different schemas from different models
+  // Cast to unknown first then to Record to handle varying schemas from LLMs
+  const rawResult = result as unknown as Record<string, unknown>;
+  const rawFindings = rawResult.findings as Record<string, unknown>[] | undefined;
+
+  const normalizedFindings: QualityFinding[] = [];
+  if (Array.isArray(rawFindings)) {
+    for (const f of rawFindings.slice(0, 5)) {
+      // Map severity -> priority, description -> message
+      const priority = (f.priority || f.severity || 'medium') as string;
+      const message = (f.message || f.description || 'No details provided') as string;
+      const validPriority = ['critical', 'high', 'medium'].includes(priority) ? priority : 'medium';
+      const relatedFiles = f.related_files as string[] | undefined;
+
+      normalizedFindings.push({
+        priority: validPriority as 'critical' | 'high' | 'medium',
+        file: (f.file as string) || relatedFiles?.[0],
+        line: f.line as number | undefined,
+        message: String(message),
+      });
+    }
+  }
+
+  // Handle summary being an object or string
+  let summaryText = 'Analysis complete.';
+  if (typeof rawResult.summary === 'string') {
+    summaryText = rawResult.summary;
+  } else if (rawResult.summary && typeof rawResult.summary === 'object') {
+    // Convert object summary to text
+    summaryText = JSON.stringify(rawResult.summary);
+  }
+
+  const confidence = typeof rawResult.confidence === 'number'
+    ? Math.min(1, Math.max(0, rawResult.confidence))
+    : 0.5;
+
   if (debug) {
     console.log('📝 DEBUG: Parsed Result:');
-    console.log(`  Findings: ${result.findings?.length || 0}`);
-    result.findings?.forEach((f, i) => {
+    console.log(`  Findings: ${normalizedFindings.length}`);
+    normalizedFindings.forEach((f, i) => {
       console.log(`    ${i + 1}. [${f.priority}] ${f.file || 'general'}: ${f.message?.substring(0, 100)}`);
     });
-    console.log(`  Summary: ${result.summary?.substring(0, 100)}`);
-    console.log(`  Confidence: ${result.confidence}`);
+    console.log(`  Summary: ${summaryText.substring(0, 100)}`);
+    console.log(`  Confidence: ${rawResult.confidence}`);
   }
 
   const totalLatencyMs = Math.round(performance.now() - totalStart);
 
   // Validate and sanitize
   return {
-    findings: Array.isArray(result.findings) ? result.findings.slice(0, 5) : [],
-    summary: result.summary || 'Analysis complete.',
-    confidence: typeof result.confidence === 'number' ? Math.min(1, Math.max(0, result.confidence)) : 0.5,
+    findings: normalizedFindings,
+    summary: summaryText,
+    confidence,
     benchmark: {
       llmLatencyMs,
       totalLatencyMs,
