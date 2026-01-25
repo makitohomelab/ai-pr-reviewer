@@ -160,13 +160,46 @@ export async function runTestQualityAgent(
     'fast'
   );
 
-  // Parse JSON response
-  const jsonMatch = response.content.match(/\{[\s\S]*\}/);
+  // Parse JSON response - handle markdown code blocks and extract valid JSON
+  let jsonContent = response.content;
+
+  // Strip markdown code blocks if present
+  const codeBlockMatch = jsonContent.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (codeBlockMatch) {
+    jsonContent = codeBlockMatch[1];
+  }
+
+  // Find the JSON object
+  const jsonMatch = jsonContent.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
     throw new Error('Failed to parse agent response as JSON');
   }
 
-  const result = JSON.parse(jsonMatch[0]) as AgentResult;
+  // Try to parse, extracting just the first complete JSON object if there's trailing content
+  let result: AgentResult;
+  try {
+    result = JSON.parse(jsonMatch[0]) as AgentResult;
+  } catch {
+    // If parsing fails, try to find a valid JSON by balancing braces
+    const text = jsonMatch[0];
+    let depth = 0;
+    let endIndex = 0;
+    for (let i = 0; i < text.length; i++) {
+      if (text[i] === '{') depth++;
+      else if (text[i] === '}') {
+        depth--;
+        if (depth === 0) {
+          endIndex = i + 1;
+          break;
+        }
+      }
+    }
+    if (endIndex > 0) {
+      result = JSON.parse(text.substring(0, endIndex)) as AgentResult;
+    } else {
+      throw new Error('Failed to parse agent response as JSON');
+    }
+  }
 
   // Validate and sanitize
   return {
