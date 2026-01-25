@@ -3,9 +3,14 @@ import { formatFindingsAsMarkdown, calculateImportance, type AgentResult } from 
 import type { FileChange } from '../lib/github.js';
 
 describe('formatFindingsAsMarkdown', () => {
-  it('should format empty findings correctly', () => {
+  it('should format empty findings with reviewed areas', () => {
     const result: AgentResult = {
       findings: [],
+      reviewed: [
+        { area: 'security', status: 'pass', details: 'No user input handling or auth changes detected' },
+        { area: 'breaking', status: 'pass', details: 'No exported APIs or signatures modified' },
+        { area: 'quality', status: 'pass', details: 'Simple change with clear intent' },
+      ],
       summary: 'No issues found.',
       confidence: 0.95,
     };
@@ -13,32 +18,22 @@ describe('formatFindingsAsMarkdown', () => {
     const md = formatFindingsAsMarkdown(result);
 
     expect(md).toContain('## AI Review');
-    expect(md).toContain('**Security**: None found');
-    expect(md).toContain('**Breaking**: None found');
-    expect(md).toContain('**Tests**: No gaps found');
-    expect(md).toContain('0 issues | Confidence: 95%');
+    expect(md).toContain('✅ **Security**');
+    expect(md).toContain('No user input handling');
+    expect(md).toContain('Confidence: 95%');
   });
 
-  it('should format findings by priority', () => {
+  it('should format findings with issues', () => {
     const result: AgentResult = {
       findings: [
-        {
-          priority: 'critical',
-          file: 'src/auth.ts',
-          line: 42,
-          message: 'SQL injection risk',
-        },
-        {
-          priority: 'high',
-          file: 'src/api.ts',
-          line: 15,
-          message: 'API signature changed',
-        },
-        {
-          priority: 'medium',
-          file: 'src/handler.ts',
-          message: 'Missing test for error path',
-        },
+        { priority: 'critical', file: 'src/auth.ts', line: 42, message: 'SQL injection risk' },
+        { priority: 'high', file: 'src/api.ts', line: 15, message: 'API signature changed' },
+        { priority: 'medium', file: 'src/handler.ts', message: 'Missing test for error path' },
+      ],
+      reviewed: [
+        { area: 'security', status: 'fail', details: 'Found SQL injection vulnerability in user input handling' },
+        { area: 'breaking', status: 'warn', details: 'API signature changed which may affect callers' },
+        { area: 'quality', status: 'warn', details: 'Missing error path test coverage' },
       ],
       summary: 'Found some issues to address.',
       confidence: 0.8,
@@ -46,30 +41,34 @@ describe('formatFindingsAsMarkdown', () => {
 
     const md = formatFindingsAsMarkdown(result);
 
-    // Check priority sections
-    expect(md).toContain('**Security**: SQL injection risk in `src/auth.ts:42`');
-    expect(md).toContain('**Breaking**: API signature changed in `src/api.ts:15`');
-    expect(md).toContain('**Tests**: Missing test for error path in `src/handler.ts`');
+    // Check reviewed sections with context
+    expect(md).toContain('❌ **Security**');
+    expect(md).toContain('SQL injection vulnerability');
+    expect(md).toContain('⚠️ **Breaking Changes**');
+    expect(md).toContain('API signature changed');
 
-    // Check footer
-    expect(md).toContain('3 issues | Confidence: 80%');
+    // Check issues section
+    expect(md).toContain('### Issues Found');
+    expect(md).toContain('🔴 **critical**');
+    expect(md).toContain('🟠 **high**');
+    expect(md).toContain('🟡 **medium**');
   });
 
-  it('should handle multiple findings per priority', () => {
+  it('should fallback to old format when no reviewed data', () => {
     const result: AgentResult = {
       findings: [
         { priority: 'critical', file: 'a.ts', message: 'Issue 1' },
-        { priority: 'critical', file: 'b.ts', message: 'Issue 2' },
       ],
-      summary: 'Multiple security issues.',
+      reviewed: [],
+      summary: 'Security issue found.',
       confidence: 0.9,
     };
 
     const md = formatFindingsAsMarkdown(result);
 
-    // Multiple findings should be joined with semicolons
-    expect(md).toContain('Issue 1 in `a.ts`; Issue 2 in `b.ts`');
-    expect(md).toContain('2 issues');
+    // Should use fallback format
+    expect(md).toContain('❌ **Security**');
+    expect(md).toContain('Issue 1');
   });
 
   it('should handle findings without file location', () => {
@@ -77,13 +76,18 @@ describe('formatFindingsAsMarkdown', () => {
       findings: [
         { priority: 'medium', message: 'General test coverage concern' },
       ],
+      reviewed: [
+        { area: 'security', status: 'pass', details: 'No security-relevant changes' },
+        { area: 'breaking', status: 'pass', details: 'No API changes' },
+        { area: 'quality', status: 'warn', details: 'Test coverage could be improved' },
+      ],
       summary: 'Review complete.',
       confidence: 0.75,
     };
 
     const md = formatFindingsAsMarkdown(result);
-    expect(md).toContain('**Tests**: General test coverage concern');
-    expect(md).toContain('1 issues | Confidence: 75%');
+    expect(md).toContain('General test coverage concern');
+    expect(md).toContain('Confidence: 75%');
   });
 });
 
@@ -129,36 +133,44 @@ describe('calculateImportance', () => {
   });
 });
 
-describe('output size', () => {
-  it('should produce concise output under 500 chars for typical review', () => {
+describe('output format', () => {
+  it('should include summary in output', () => {
     const result: AgentResult = {
-      findings: [
-        { priority: 'high', file: 'api.ts', line: 42, message: 'API signature changed' },
-        { priority: 'medium', file: 'handler.ts', message: 'Missing error test' },
+      findings: [],
+      reviewed: [
+        { area: 'security', status: 'pass', details: 'Clean' },
+        { area: 'breaking', status: 'pass', details: 'No changes' },
+        { area: 'quality', status: 'pass', details: 'Good' },
       ],
-      summary: 'Two issues found.',
-      confidence: 0.85,
+      summary: 'All checks passed.',
+      confidence: 0.95,
     };
 
     const md = formatFindingsAsMarkdown(result);
-    expect(md.length).toBeLessThan(500);
+    expect(md).toContain('**Summary**: All checks passed.');
   });
 
-  it('should stay concise even with max findings', () => {
+  it('should show benchmark data when provided', () => {
     const result: AgentResult = {
-      findings: [
-        { priority: 'critical', file: 'auth.ts', line: 10, message: 'SQL injection risk' },
-        { priority: 'critical', file: 'login.ts', line: 20, message: 'Hardcoded secret' },
-        { priority: 'high', file: 'api.ts', line: 30, message: 'Breaking API change' },
-        { priority: 'medium', file: 'test.ts', line: 40, message: 'Missing test case' },
-        { priority: 'medium', file: 'util.ts', line: 50, message: 'Null check missing' },
+      findings: [],
+      reviewed: [
+        { area: 'security', status: 'pass', details: 'Clean' },
+        { area: 'breaking', status: 'pass', details: 'No changes' },
+        { area: 'quality', status: 'pass', details: 'Good' },
       ],
-      summary: 'Multiple issues found.',
-      confidence: 0.75,
+      summary: 'Review complete.',
+      confidence: 0.9,
+      benchmark: {
+        llmLatencyMs: 2500,
+        totalLatencyMs: 2600,
+        inputTokens: 500,
+        outputTokens: 100,
+        model: 'qwen2.5-coder:32b',
+      },
     };
 
     const md = formatFindingsAsMarkdown(result);
-    // With 5 findings, should still be reasonably compact
-    expect(md.length).toBeLessThan(700);
+    expect(md).toContain('qwen2.5-coder:32b');
+    expect(md).toContain('2.5s');
   });
 });

@@ -27,8 +27,15 @@ export interface BenchmarkData {
   model: string;
 }
 
+export interface ReviewedArea {
+  area: 'security' | 'breaking' | 'quality';
+  status: 'pass' | 'warn' | 'fail';
+  details: string; // What was checked and why it passed/failed
+}
+
 export interface AgentResult {
   findings: QualityFinding[];
+  reviewed: ReviewedArea[]; // Explanation of what was analyzed
   summary: string;
   confidence: number; // 0-1 score of how confident the agent is in its analysis
   benchmark?: BenchmarkData;
@@ -88,33 +95,46 @@ const RESPONSE_SCHEMA = {
         required: ['priority', 'message'],
       },
     },
+    reviewed: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          area: { type: 'string', enum: ['security', 'breaking', 'quality'] },
+          status: { type: 'string', enum: ['pass', 'warn', 'fail'] },
+          details: { type: 'string' },
+        },
+        required: ['area', 'status', 'details'],
+      },
+    },
     summary: { type: 'string' },
     confidence: { type: 'number' },
   },
-  required: ['findings', 'summary', 'confidence'],
+  required: ['findings', 'reviewed', 'summary', 'confidence'],
 };
 
 /**
  * System prompt optimized for Qwen 2.5 Coder.
  * - Direct, focused instructions
  * - Leverages Qwen's code analysis training
- * - No JSON formatting instructions (schema handles that)
+ * - Requires explanation of what was reviewed
  */
 function buildSystemPrompt(): string {
-  return `You are a senior code reviewer. Analyze the diff and report issues.
+  return `You are a senior code reviewer. Analyze the diff and provide a detailed review.
 
-PRIORITIES:
-- critical: Security vulnerabilities (injection, auth bypass, secrets exposure, unsafe deserialization)
-- high: Breaking changes (API changes, removed exports, behavior changes affecting callers)
-- medium: Bugs (null pointer risks, race conditions, missing error handling, untested paths)
+REVIEW AREAS (you must analyze all three):
+1. security: Check for injection, auth bypass, secrets exposure, unsafe deserialization, XSS, CSRF
+2. breaking: Check for API changes, removed exports, signature changes, behavior changes affecting callers
+3. quality: Check for null risks, race conditions, missing error handling, resource leaks, untested paths
 
-RULES:
+For each area, explain WHAT you checked and WHY it passed or failed. Be specific about the code.
+
+FINDINGS (if any issues found):
+- priority: critical (security), high (breaking), medium (quality)
+- Include file path and line number
 - Max 5 issues, most severe first
-- Skip style/formatting issues
-- Be specific: include file path and line number when possible
-- If code looks correct, return empty findings with high confidence
 
-Analyze the changes carefully. Focus on what could break or compromise the system.`;
+Skip style/formatting. Focus on correctness and safety.`;
 }
 
 function buildPrompt(files: FileChange[], prTitle: string, prBody: string): string {
@@ -161,6 +181,11 @@ export async function runTestQualityAgent(
   if (relevantFiles.length === 0) {
     return {
       findings: [],
+      reviewed: [
+        { area: 'security', status: 'pass', details: 'No code changes to review (only lock files or generated code)' },
+        { area: 'breaking', status: 'pass', details: 'No API or behavior changes detected' },
+        { area: 'quality', status: 'pass', details: 'No code quality issues to check' },
+      ],
       summary: 'No reviewable code changes found.',
       confidence: 1.0,
     };
@@ -230,6 +255,20 @@ export async function runTestQualityAgent(
     }
   }
 
+  // Parse reviewed areas
+  const reviewed: ReviewedArea[] = [];
+  if (Array.isArray(result.reviewed)) {
+    for (const r of result.reviewed) {
+      if (['security', 'breaking', 'quality'].includes(r.area)) {
+        reviewed.push({
+          area: r.area as 'security' | 'breaking' | 'quality',
+          status: ['pass', 'warn', 'fail'].includes(r.status) ? r.status as 'pass' | 'warn' | 'fail' : 'pass',
+          details: String(r.details || 'No details provided'),
+        });
+      }
+    }
+  }
+
   const summary = typeof result.summary === 'string' ? result.summary : 'Analysis complete.';
   const confidence = typeof result.confidence === 'number'
     ? Math.min(1, Math.max(0, result.confidence))
@@ -249,6 +288,7 @@ export async function runTestQualityAgent(
 
   return {
     findings,
+    reviewed,
     summary,
     confidence,
     benchmark: {
@@ -265,52 +305,68 @@ export async function runTestQualityAgent(
  * Format agent findings as a GitHub-flavored markdown comment
  */
 export function formatFindingsAsMarkdown(result: AgentResult): string {
+  const statusIcon = (status: string) => {
+    switch (status) {
+      case 'pass': return '✅';
+      case 'warn': return '⚠️';
+      case 'fail': return '❌';
+      default: return '•';
+    }
+  };
+
+  const areaLabel = (area: string) => {
+    switch (area) {
+      case 'security': return 'Security';
+      case 'breaking': return 'Breaking Changes';
+      case 'quality': return 'Code Quality';
+      default: return area;
+    }
+  };
+
   let md = `## AI Review\n\n`;
 
-  // Group findings by priority
-  const critical = result.findings.filter((f) => f.priority === 'critical');
-  const high = result.findings.filter((f) => f.priority === 'high');
-  const medium = result.findings.filter((f) => f.priority === 'medium');
-
-  // Security
-  if (critical.length > 0) {
-    md += `**Security**: ${critical.map((f) => formatFinding(f)).join('; ')}\n`;
+  // Show reviewed areas with explanations
+  if (result.reviewed && result.reviewed.length > 0) {
+    for (const r of result.reviewed) {
+      md += `${statusIcon(r.status)} **${areaLabel(r.area)}**: ${r.details}\n\n`;
+    }
   } else {
-    md += `**Security**: None found\n`;
+    // Fallback to old format if no reviewed data
+    const critical = result.findings.filter((f) => f.priority === 'critical');
+    const high = result.findings.filter((f) => f.priority === 'high');
+    const medium = result.findings.filter((f) => f.priority === 'medium');
+
+    md += critical.length > 0
+      ? `❌ **Security**: ${critical.map((f) => formatFinding(f)).join('; ')}\n\n`
+      : `✅ **Security**: No vulnerabilities found\n\n`;
+
+    md += high.length > 0
+      ? `❌ **Breaking Changes**: ${high.map((f) => formatFinding(f)).join('; ')}\n\n`
+      : `✅ **Breaking Changes**: No breaking changes detected\n\n`;
+
+    md += medium.length > 0
+      ? `⚠️ **Code Quality**: ${medium.map((f) => formatFinding(f)).join('; ')}\n\n`
+      : `✅ **Code Quality**: No issues found\n\n`;
   }
 
-  // Breaking changes
-  if (high.length > 0) {
-    md += `**Breaking**: ${high.map((f) => formatFinding(f)).join('; ')}\n`;
-  } else {
-    md += `**Breaking**: None found\n`;
+  // Show findings if any
+  if (result.findings.length > 0) {
+    md += `### Issues Found\n\n`;
+    for (const f of result.findings) {
+      const icon = f.priority === 'critical' ? '🔴' : f.priority === 'high' ? '🟠' : '🟡';
+      const location = f.file ? ` in \`${f.file}${f.line ? `:${f.line}` : ''}\`` : '';
+      md += `${icon} **${f.priority}**: ${f.message}${location}\n\n`;
+    }
   }
 
-  // Tests/Quality
-  if (medium.length > 0) {
-    md += `**Tests**: ${medium.map((f) => formatFinding(f)).join('; ')}\n`;
-  } else {
-    md += `**Tests**: No gaps found\n`;
-  }
-
-  md += `\n---\n`;
-  md += `${result.findings.length} issues | Confidence: ${(result.confidence * 100).toFixed(0)}%`;
+  md += `---\n`;
+  md += `**Summary**: ${result.summary}\n\n`;
+  md += `Confidence: ${(result.confidence * 100).toFixed(0)}%`;
 
   // Add benchmark data if available
   if (result.benchmark) {
     const b = result.benchmark;
-    md += `\n\n<details>\n<summary>Benchmark</summary>\n\n`;
-    md += `| Metric | Value |\n|--------|-------|\n`;
-    md += `| Model | \`${b.model}\` |\n`;
-    md += `| LLM Latency | ${(b.llmLatencyMs / 1000).toFixed(2)}s |\n`;
-    md += `| Total Latency | ${(b.totalLatencyMs / 1000).toFixed(2)}s |\n`;
-    if (b.inputTokens !== undefined) {
-      md += `| Input Tokens | ${b.inputTokens.toLocaleString()} |\n`;
-    }
-    if (b.outputTokens !== undefined) {
-      md += `| Output Tokens | ${b.outputTokens.toLocaleString()} |\n`;
-    }
-    md += `\n</details>`;
+    md += ` | Model: \`${b.model}\` | ${(b.llmLatencyMs / 1000).toFixed(1)}s`;
   }
 
   return md;
