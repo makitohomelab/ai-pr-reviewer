@@ -4,6 +4,17 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
 
+# Homelab configuration - edit these values for your setup
+env:
+  # Ollama inference server (Desktop GPU)
+  OLLAMA_BASE_URL: http://192.168.1.189:11434/v1
+  # Available models (change as needed):
+  #   qwen2.5-coder:7b   - Fast, good quality (4.4GB)
+  #   qwen2.5-coder:14b  - Best balance of speed/quality (8.4GB) [recommended]
+  #   qwen2.5-coder:32b  - Highest quality, slower (18.4GB)
+  #   deepseek-coder:6.7b - Legacy fallback (3.5GB)
+  OLLAMA_MODEL: qwen2.5-coder:32b
+
 permissions:
   contents: read
   pull-requests: write
@@ -33,7 +44,7 @@ jobs:
 
   ai-review:
     name: AI Code Review
-    runs-on: self-hosted  # Uses your homelab runner with Claude Code
+    runs-on: [self-hosted, claude-code]
     needs: test
     if: needs.test.outputs.tests_passed == 'true'
     steps:
@@ -41,76 +52,49 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Get PR diff
-        id: diff
-        run: |
-          git diff ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }} > /tmp/pr-diff.patch
-          echo "Files changed:"
-          git diff --name-only ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}
+      - name: Wake Desktop for Ollama
+        run: ~/scripts/wake-desktop.sh
 
-      - name: Run Claude Code Review
-        id: review
+      - name: Verify Ollama Available
+        run: |
+          # Extract base URL without /v1 suffix for health check
+          OLLAMA_API="${OLLAMA_BASE_URL%/v1}"
+          for i in {1..10}; do
+            if curl -s --connect-timeout 5 "$OLLAMA_API/api/tags"; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Ollama not responding after wake" && exit 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Run AI Review
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MODEL_PROVIDER: ollama
+          OLLAMA_BASE_URL: ${{ env.OLLAMA_BASE_URL }}
+          OLLAMA_MODEL: ${{ env.OLLAMA_MODEL }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO_OWNER: ${{ github.repository_owner }}
+          REPO_NAME: ${{ github.event.repository.name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # Create the review prompt
-          cat > /tmp/review-prompt.md << 'PROMPT_EOF'
-          Review this pull request and provide feedback.
-
-          ## PR Info
-          - Title: ${{ github.event.pull_request.title }}
-          - Author: ${{ github.event.pull_request.user.login }}
-          - Description: ${{ github.event.pull_request.body }}
-
-          ## Task
-          Analyze the code changes and provide:
-          1. **Summary**: Brief overview of the changes
-          2. **Test Coverage**: Are new features adequately tested?
-          3. **Code Quality**: Any code smells or improvements?
-          4. **Potential Issues**: Bugs, edge cases, security concerns?
-          5. **Suggestions**: Constructive improvements
-
-          Be concise and constructive. Focus on significant issues, not style nitpicks.
-
-          Output your review as markdown suitable for a GitHub PR comment.
-          PROMPT_EOF
-
-          # Run Claude Code with the diff
-          cd ${{ github.workspace }}
-
-          # Use Claude Code to review (--print outputs to stdout, -p for prompt)
-          claude --print -p "$(cat /tmp/review-prompt.md)
-
-          Here is the diff to review:
-
-          $(cat /tmp/pr-diff.patch | head -c 50000)" > /tmp/review-output.md
-
-          echo "Review generated"
-
-      - name: Post Review Comment
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const review = fs.readFileSync('/tmp/review-output.md', 'utf8');
-
-            const body = `## 🤖 AI Code Review
-
-            ${review}
-
-            ---
-            *Reviewed by Claude Code on self-hosted runner*`;
-
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: body
-            });
+          DEBUG_AI_REVIEW: "true"
+        run: node dist/index.js
 
   skip-review:
     name: Skip AI Review (Tests Failed)

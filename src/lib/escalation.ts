@@ -20,7 +20,7 @@ export interface EscalationConfig {
 
 export const DEFAULT_CONFIG: EscalationConfig = {
   criticalFilePatterns: [
-    // Security-sensitive
+    // Security-sensitive files that require human review
     '**/security/**',
     '**/.env*',
     '**/secrets/**',
