@@ -54,4 +54,11 @@ export interface ModelProvider {
    * @returns true if the provider is ready to accept requests
    */
   healthCheck(): Promise<boolean>;
+
+  /**
+   * Get the model name for a given tier.
+   * @param tier - Model tier
+   * @returns The model name/identifier
+   */
+  getModelName(tier: ModelTier): string;
 }

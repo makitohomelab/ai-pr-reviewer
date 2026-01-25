@@ -20,10 +20,19 @@ export interface QualityFinding {
   message: string;
 }
 
+export interface BenchmarkData {
+  llmLatencyMs: number;
+  totalLatencyMs: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  model: string;
+}
+
 export interface AgentResult {
   findings: QualityFinding[];
   summary: string;
   confidence: number; // 0-1 score of how confident the agent is in its analysis
+  benchmark?: BenchmarkData;
 }
 
 export type PRImportance = 'low' | 'medium' | 'high';
@@ -60,14 +69,7 @@ export function calculateImportance(files: FileChange[]): PRImportance {
   return 'low';
 }
 
-function buildSystemPrompt(importance: PRImportance): string {
-  const charLimits: Record<PRImportance, number> = {
-    low: 100,
-    medium: 150,
-    high: 250,
-  };
-  const charLimit = charLimits[importance];
-
+function buildSystemPrompt(): string {
   return `You are a focused code reviewer. Analyze changes in priority order:
 
 1. **critical** - Security issues: injection, auth bypass, secrets exposure, unsafe deserialization
@@ -76,16 +78,16 @@ function buildSystemPrompt(importance: PRImportance): string {
 
 Rules:
 - Return max 5 findings, highest priority first
-- Keep each message under ${charLimit} characters
 - Skip style/formatting issues entirely
 - Only report issues you're confident about
+- Be thorough in your explanations
 
 Respond with JSON:
 {
   "findings": [
-    {"priority": "critical"|"high"|"medium", "file": "path.ts", "line": 42, "message": "Brief issue"}
+    {"priority": "critical"|"high"|"medium", "file": "path.ts", "line": 42, "message": "Detailed explanation of the issue"}
   ],
-  "summary": "One sentence assessment",
+  "summary": "Assessment of the changes",
   "confidence": 0.85
 }`;
 }
@@ -120,6 +122,8 @@ export async function runTestQualityAgent(
   prTitle: string,
   prBody: string
 ): Promise<AgentResult> {
+  const totalStart = performance.now();
+
   // Filter to relevant files (skip lock files, generated code, etc.)
   const relevantFiles = files.filter((f) => {
     const skip = [
@@ -148,9 +152,9 @@ export async function runTestQualityAgent(
   }));
 
   const prompt = buildPrompt(truncatedFiles, prTitle, prBody);
-  const importance = calculateImportance(relevantFiles);
-  const systemPrompt = buildSystemPrompt(importance);
+  const systemPrompt = buildSystemPrompt();
 
+  const llmStart = performance.now();
   const response = await provider.chat(
     {
       system: systemPrompt,
@@ -159,6 +163,7 @@ export async function runTestQualityAgent(
     },
     'fast'
   );
+  const llmLatencyMs = Math.round(performance.now() - llmStart);
 
   // Parse JSON response - handle markdown code blocks and extract valid JSON
   let jsonContent = response.content;
@@ -201,11 +206,20 @@ export async function runTestQualityAgent(
     }
   }
 
+  const totalLatencyMs = Math.round(performance.now() - totalStart);
+
   // Validate and sanitize
   return {
     findings: Array.isArray(result.findings) ? result.findings.slice(0, 5) : [],
     summary: result.summary || 'Analysis complete.',
     confidence: typeof result.confidence === 'number' ? Math.min(1, Math.max(0, result.confidence)) : 0.5,
+    benchmark: {
+      llmLatencyMs,
+      totalLatencyMs,
+      inputTokens: response.usage?.inputTokens,
+      outputTokens: response.usage?.outputTokens,
+      model: provider.getModelName('fast'),
+    },
   };
 }
 
@@ -249,6 +263,23 @@ export function formatFindingsAsMarkdown(result: AgentResult): string {
 
   md += `\n---\n`;
   md += `${result.findings.length} issues | Confidence: ${(result.confidence * 100).toFixed(0)}%`;
+
+  // Add benchmark data if available
+  if (result.benchmark) {
+    const b = result.benchmark;
+    md += `\n\n<details>\n<summary>Benchmark</summary>\n\n`;
+    md += `| Metric | Value |\n|--------|-------|\n`;
+    md += `| Model | \`${b.model}\` |\n`;
+    md += `| LLM Latency | ${(b.llmLatencyMs / 1000).toFixed(2)}s |\n`;
+    md += `| Total Latency | ${(b.totalLatencyMs / 1000).toFixed(2)}s |\n`;
+    if (b.inputTokens !== undefined) {
+      md += `| Input Tokens | ${b.inputTokens.toLocaleString()} |\n`;
+    }
+    if (b.outputTokens !== undefined) {
+      md += `| Output Tokens | ${b.outputTokens.toLocaleString()} |\n`;
+    }
+    md += `\n</details>`;
+  }
 
   return md;
 }

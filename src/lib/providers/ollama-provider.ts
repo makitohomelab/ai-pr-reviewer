@@ -14,7 +14,9 @@ import type {
 
 interface OllamaConfig {
   baseUrl: string;
-  model: string;
+  model?: string; // backward compat, sets both fast and smart
+  fastModel?: string;
+  smartModel?: string;
 }
 
 interface OpenAIChatMessage {
@@ -45,13 +47,21 @@ export class OllamaProvider implements ModelProvider {
   readonly name = 'ollama';
   readonly defaultModel: string;
   private readonly baseUrl: string;
+  private readonly fastModel: string;
+  private readonly smartModel: string;
 
   constructor(config?: Partial<OllamaConfig>) {
     this.baseUrl = config?.baseUrl || process.env.OLLAMA_BASE_URL || 'http://localhost:11434/v1';
-    this.defaultModel = config?.model || process.env.OLLAMA_MODEL || 'llama3.2:3b';
+
+    // Support single model (backward compat) or separate fast/smart models
+    const defaultModel = config?.model || process.env.OLLAMA_MODEL || 'llama3.2:3b';
+    this.fastModel = config?.fastModel || process.env.OLLAMA_FAST_MODEL || defaultModel;
+    this.smartModel = config?.smartModel || process.env.OLLAMA_SMART_MODEL || defaultModel;
+    this.defaultModel = this.fastModel;
   }
 
-  async chat(params: ChatCompletionParams, _tier?: ModelTier): Promise<ChatCompletionResult> {
+  async chat(params: ChatCompletionParams, tier: ModelTier = 'fast'): Promise<ChatCompletionResult> {
+    const model = tier === 'smart' ? this.smartModel : this.fastModel;
     const messages: OpenAIChatMessage[] = [];
 
     // Add system message if provided
@@ -65,7 +75,7 @@ export class OllamaProvider implements ModelProvider {
     }
 
     const request: OpenAIChatRequest = {
-      model: this.defaultModel,
+      model,
       messages,
       max_tokens: params.maxTokens,
     };
@@ -114,5 +124,9 @@ export class OllamaProvider implements ModelProvider {
     } catch {
       return false;
     }
+  }
+
+  getModelName(tier: ModelTier): string {
+    return tier === 'smart' ? this.smartModel : this.fastModel;
   }
 }

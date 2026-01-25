@@ -33,8 +33,8 @@ export class AnthropicProvider implements ModelProvider {
     }
 
     this.client = new Anthropic({ apiKey });
-    this.fastModel = config?.fastModel || 'claude-3-5-haiku-20241022';
-    this.smartModel = config?.smartModel || 'claude-sonnet-4-20250514';
+    this.fastModel = config?.fastModel || process.env.ANTHROPIC_FAST_MODEL || 'claude-3-5-haiku-20241022';
+    this.smartModel = config?.smartModel || process.env.ANTHROPIC_SMART_MODEL || 'claude-sonnet-4-20250514';
     this.defaultModel = this.fastModel;
   }
 
@@ -80,5 +80,9 @@ export class AnthropicProvider implements ModelProvider {
     } catch {
       return false;
     }
+  }
+
+  getModelName(tier: ModelTier): string {
+    return tier === 'smart' ? this.smartModel : this.fastModel;
   }
 }
