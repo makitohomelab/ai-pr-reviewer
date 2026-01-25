@@ -80,13 +80,20 @@ export class OllamaProvider implements ModelProvider {
       max_tokens: params.maxTokens,
     };
 
+    // Use generous timeout for larger models (5 minutes)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 300000);
+
     const response = await fetch(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(request),
+      signal: controller.signal,
     });
+
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       const errorText = await response.text();
