@@ -4,10 +4,11 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
 
-# Homelab configuration - edit these values for your setup
+# Configuration - edit these values for your setup
 env:
-  # Ollama inference server (Desktop GPU) - uses native API for structured output
-  OLLAMA_BASE_URL: http://192.168.1.189:11434
+  # Ollama inference server - uses native API for structured output
+  # Set this to your Ollama server URL (e.g., http://localhost:11434 or your GPU server)
+  OLLAMA_BASE_URL: ${{ vars.OLLAMA_BASE_URL || 'http://localhost:11434' }}
 
   # Default model (backward compat - used if capability-specific models not set)
   OLLAMA_MODEL: qwen2.5-coder:32b

@@ -40,17 +40,16 @@ AI-powered pull request reviewer using Claude Code on a self-hosted GitHub Actio
 ### 1. Create GitHub Repository
 
 ```bash
-cd /Users/adammak/ai-pr-reviewer
 gh repo create ai-pr-reviewer --private --source=. --push
 ```
 
-### 2. Setup Self-Hosted Runner on Homelab
+### 2. Setup Self-Hosted Runner
 
-SSH to your homelab and run the setup script:
+SSH to your server and run the setup script:
 
 ```bash
-# On homelab (192.168.1.188)
-ssh makito@192.168.1.188
+# SSH to your self-hosted runner machine
+ssh your-user@your-server
 
 # Install Claude Code if not already installed
 npm install -g @anthropic-ai/claude-code

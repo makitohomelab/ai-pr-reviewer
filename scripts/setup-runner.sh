@@ -1,6 +1,6 @@
 #!/bin/bash
 # Setup GitHub Actions self-hosted runner with Claude Code
-# Run this on your homelab (192.168.1.188) or mediaengine
+# Run this on your self-hosted runner machine (e.g., homelab server)
 
 set -e
 
