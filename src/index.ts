@@ -34,12 +34,12 @@ import {
   type AggregatedResult,
 } from './pipeline/index.js';
 
-interface ReviewResult {
+export interface ReviewResult {
   pipeline: PipelineResult;
   aggregated: AggregatedResult;
 }
 
-async function runReview(
+export async function runReview(
   provider: ModelProvider,
   context: PRContext,
   diff: PRDiff
@@ -197,7 +197,13 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((error) => {
-  console.error('❌ Review failed:', error);
-  process.exit(1);
-});
+// Only run main() when this file is the entry point (not when imported)
+import { fileURLToPath } from 'url';
+const isMainModule = process.argv[1] === fileURLToPath(import.meta.url);
+
+if (isMainModule) {
+  main().catch((error) => {
+    console.error('❌ Review failed:', error);
+    process.exit(1);
+  });
+}

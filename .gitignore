@@ -6,3 +6,6 @@ dist/
 .DS_Store
 coverage/
 *.tsbuildinfo
+# Build artifacts
+data/
+*.db
