@@ -4,6 +4,9 @@
  * Executes specialized agents in sequence or parallel.
  * - Sequential: Each agent sees findings from previous agents (better deduplication)
  * - Parallel: All agents run concurrently (faster, ~4x speedup)
+ *
+ * Includes pre-analysis phase that runs static code analysis and
+ * infrastructure checks before agents execute.
  */
 
 import type { FileChange } from '../lib/github.js';
@@ -19,7 +22,16 @@ import {
   createBreakingAgent,
   createTestCoverageAgent,
   createPerformanceAgent,
+  createCodebaseQualityAgent,
+  CodebaseQualityAgent,
 } from '../agents/index.js';
+import {
+  analyzeCodebase,
+  analyzeInfrastructure,
+  type StaticAnalysis,
+  type InfraAnalysis,
+  type InfraAnalysisConfig,
+} from '../analysis/index.js';
 
 /**
  * Execution mode for the pipeline.
@@ -27,6 +39,22 @@ import {
  * - 'parallel': All agents run concurrently for faster execution
  */
 export type ExecutionMode = 'sequential' | 'parallel';
+
+/**
+ * Configuration for pre-analysis phase.
+ */
+export interface PreAnalysisConfig {
+  /** Enable static code analysis */
+  enableStaticAnalysis?: boolean;
+  /** Enable infrastructure analysis (requires MCP client) */
+  enableInfraAnalysis?: boolean;
+  /** Infrastructure analysis options */
+  infraConfig?: Omit<InfraAnalysisConfig, 'skip'>;
+  /** Repository root path for file analysis */
+  repoPath?: string;
+  /** File paths to analyze (if not provided, uses changed files) */
+  filePaths?: string[];
+}
 
 /**
  * Configuration for the pipeline.
@@ -40,6 +68,8 @@ export interface PipelineConfig {
   stopOnCritical?: boolean;
   /** Enable verbose logging */
   verbose?: boolean;
+  /** Pre-analysis configuration */
+  preAnalysis?: PreAnalysisConfig;
 }
 
 /**
@@ -60,6 +90,10 @@ export interface PipelineResult {
   hasCritical: boolean;
   /** Execution mode used */
   executionMode: ExecutionMode;
+  /** Static analysis results (if enabled) */
+  staticAnalysis?: StaticAnalysis;
+  /** Infrastructure analysis results (if enabled) */
+  infraAnalysis?: InfraAnalysis;
 }
 
 /**
@@ -71,6 +105,7 @@ function createDefaultAgents(provider: ModelProvider): BaseAgent[] {
     createBreakingAgent(provider),
     createTestCoverageAgent(provider),
     createPerformanceAgent(provider),
+    createCodebaseQualityAgent(provider),
   ];
 }
 
@@ -80,7 +115,9 @@ function createDefaultAgents(provider: ModelProvider): BaseAgent[] {
 export class PipelineOrchestrator {
   private readonly provider: ModelProvider;
   private readonly agents: BaseAgent[];
-  private readonly config: Required<PipelineConfig>;
+  private readonly config: Required<Omit<PipelineConfig, 'preAnalysis'>> & {
+    preAnalysis?: PreAnalysisConfig;
+  };
 
   constructor(provider: ModelProvider, config: PipelineConfig = {}) {
     this.provider = provider;
@@ -90,10 +127,87 @@ export class PipelineOrchestrator {
       executionMode: config.executionMode ?? 'sequential',
       stopOnCritical: config.stopOnCritical ?? false,
       verbose: config.verbose ?? (process.env.DEBUG_AI_REVIEW === 'true'),
+      preAnalysis: config.preAnalysis,
     };
 
     // Sort agents by priority (relevant for sequential mode)
     this.agents.sort((a, b) => a.priority - b.priority);
+  }
+
+  /**
+   * Run pre-analysis phase (static analysis + infrastructure checks).
+   */
+  private async runPreAnalysis(
+    files: FileChange[]
+  ): Promise<{ static?: StaticAnalysis; infra?: InfraAnalysis }> {
+    const preConfig = this.config.preAnalysis;
+    if (!preConfig) {
+      return {};
+    }
+
+    const result: { static?: StaticAnalysis; infra?: InfraAnalysis } = {};
+
+    // Run static analysis
+    if (preConfig.enableStaticAnalysis && preConfig.repoPath) {
+      if (this.config.verbose) {
+        console.log('\n📊 Running static code analysis...');
+      }
+
+      try {
+        const filePaths = preConfig.filePaths || files.map((f) => f.filename);
+        result.static = await analyzeCodebase(preConfig.repoPath, filePaths);
+
+        if (this.config.verbose) {
+          console.log(`   Files analyzed: ${result.static.fileMetrics.totalFiles}`);
+          console.log(`   Complexity hotspots: ${result.static.complexityHotspots.length}`);
+          console.log(`   Unused exports: ${result.static.unusedExports.length}`);
+        }
+      } catch (error) {
+        console.error('❌ Static analysis failed:', error);
+      }
+    }
+
+    // Run infrastructure analysis
+    if (preConfig.enableInfraAnalysis && preConfig.infraConfig?.mcpClient) {
+      if (this.config.verbose) {
+        console.log('\n🔧 Running infrastructure analysis...');
+      }
+
+      try {
+        result.infra = await analyzeInfrastructure({
+          ...preConfig.infraConfig,
+          skip: false,
+        });
+
+        if (this.config.verbose) {
+          if (result.infra.skipped) {
+            console.log(`   Skipped: ${result.infra.skipReason}`);
+          } else {
+            console.log(`   Containers: ${result.infra.containers.running}/${result.infra.containers.total}`);
+            console.log(`   Config drift: ${result.infra.configDrift.verdict}`);
+          }
+        }
+      } catch (error) {
+        console.error('❌ Infrastructure analysis failed:', error);
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Prepare CodebaseQualityAgent with analysis data.
+   */
+  private prepareCodebaseQualityAgent(
+    staticAnalysis?: StaticAnalysis,
+    infraAnalysis?: InfraAnalysis
+  ): void {
+    // Find the CodebaseQualityAgent and set its analysis data
+    for (const agent of this.agents) {
+      if (agent instanceof CodebaseQualityAgent) {
+        agent.setAnalysisData(staticAnalysis, infraAnalysis);
+      }
+    }
   }
 
   /**
@@ -106,10 +220,25 @@ export class PipelineOrchestrator {
     context: BaseContext,
     delta: PRDelta
   ): Promise<PipelineResult> {
+    // Run pre-analysis phase
+    const preAnalysis = await this.runPreAnalysis(files);
+
+    // Prepare CodebaseQualityAgent with analysis data
+    this.prepareCodebaseQualityAgent(preAnalysis.static, preAnalysis.infra);
+
+    // Run agents
+    let result: PipelineResult;
     if (this.config.executionMode === 'parallel') {
-      return this.runParallel(files, prTitle, prBody, context, delta);
+      result = await this.runParallel(files, prTitle, prBody, context, delta);
+    } else {
+      result = await this.runSequential(files, prTitle, prBody, context, delta);
     }
-    return this.runSequential(files, prTitle, prBody, context, delta);
+
+    // Attach pre-analysis results
+    result.staticAnalysis = preAnalysis.static;
+    result.infraAnalysis = preAnalysis.infra;
+
+    return result;
   }
 
   /**

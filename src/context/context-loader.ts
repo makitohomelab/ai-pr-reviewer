@@ -30,6 +30,7 @@ export interface QwenPromptFragments {
   breakingPreamble: string;
   testCoveragePreamble: string;
   performancePreamble: string;
+  codebaseQualityPreamble: string;
 }
 
 /**
@@ -54,6 +55,7 @@ const DEFAULT_CONTEXT: BaseContext = {
     breakingPreamble: '',
     testCoveragePreamble: '',
     performancePreamble: '',
+    codebaseQualityPreamble: '',
   },
   hasCustomContext: false,
 };
@@ -67,6 +69,7 @@ function parseQwenPrompts(content: string): QwenPromptFragments {
     breakingPreamble: '',
     testCoveragePreamble: '',
     performancePreamble: '',
+    codebaseQualityPreamble: '',
   };
 
   // Extract sections by headers
@@ -85,6 +88,8 @@ function parseQwenPrompts(content: string): QwenPromptFragments {
       fragments.testCoveragePreamble = body;
     } else if (header.includes('performance')) {
       fragments.performancePreamble = body;
+    } else if (header.includes('codebase') || header.includes('quality')) {
+      fragments.codebaseQualityPreamble = body;
     }
   }
 
@@ -114,6 +119,7 @@ export async function loadBaseContext(repoRoot: string): Promise<BaseContext> {
       breakingPreamble: '',
       testCoveragePreamble: '',
       performancePreamble: '',
+      codebaseQualityPreamble: '',
     },
     hasCustomContext: true,
   };

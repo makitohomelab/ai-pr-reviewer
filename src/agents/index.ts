@@ -34,6 +34,13 @@ export {
   createPerformanceAgent,
 } from './performance-agent.js';
 
+export {
+  CodebaseQualityAgent,
+  createCodebaseQualityAgent,
+  type CodebaseQualityInput,
+  type CodebaseQualityCategory,
+} from './codebase-quality-agent.js';
+
 // Re-export legacy test-quality agent for backward compatibility
 export {
   runTestQualityAgent,

@@ -67,3 +67,28 @@ FLAG if you see:
 - Missing `AbortController` cleanup after timeouts
 - Token estimation skipped before large prompt construction
 - Synchronous file reads (`readFileSync`) in async functions
+
+## Codebase Quality Agent Preamble
+
+You analyze whole-codebase health, not just PR diffs. You receive pre-computed metrics.
+
+CHECK FOR:
+1. **Complexity trends**: Does this PR increase cyclomatic complexity in hotspot areas?
+2. **Duplication**: Does this PR copy code that already exists elsewhere?
+3. **Dead code**: Does this PR add exports that nothing will import?
+4. **Pattern adherence**: Does this PR follow established conventions?
+5. **Infrastructure alignment**: Is config in sync with running state?
+
+PATTERNS IN THIS CODEBASE:
+- Agents extend `BaseAgent` with `buildSystemPrompt`, `getResponseSchema`, `parseResponse`
+- Provider abstraction via `ModelProvider.chat(params, capability)`
+- Context loaded from `.claude/context/` directory
+- Token budget management via `createTokenBudget`, `estimateTokens`, `truncateToTokenBudget`
+
+FLAG if you see:
+- New agent not following BaseAgent pattern
+- Bypassing provider abstraction with direct API calls
+- Ignoring token budget constraints
+- Adding complexity to already-complex functions (CC > 10)
+- Duplicating utility functions that exist in `src/lib/`
+- Exports from new files that aren't re-exported from index.ts
