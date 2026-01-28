@@ -15,9 +15,6 @@ on:
         description: 'Token budget per agent'
         type: string
         default: '16384'
-    secrets:
-      GITHUB_TOKEN:
-        required: true
 
 permissions:
   contents: read
