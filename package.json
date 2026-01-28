@@ -4,6 +4,9 @@
   "description": "AI-powered PR reviewer with specialized subagents",
   "type": "module",
   "main": "dist/index.js",
+  "bin": {
+    "ai-review": "./dist/cli.js"
+  },
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
