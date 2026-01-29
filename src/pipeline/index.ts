@@ -14,6 +14,7 @@ export {
 
 export {
   aggregateResults,
+  filterUngroundedFindings,
   formatAsMarkdown,
   formatAsCompactSummary,
   type AggregatedResult,

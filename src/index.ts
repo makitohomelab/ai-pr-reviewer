@@ -109,8 +109,8 @@ export async function runReview(
     prDelta
   );
 
-  // Aggregate results
-  const aggregated = aggregateResults(pipelineResult);
+  // Aggregate results (pass diff files to filter hallucinated file references)
+  const aggregated = aggregateResults(pipelineResult, reviewableFiles);
 
   return {
     pipeline: pipelineResult,

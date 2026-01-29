@@ -14,6 +14,7 @@ import {
   createGitHubClient,
   getPRDiff,
   type PRContext,
+  type FileChange,
 } from './lib/github.js';
 import { createProvider } from './lib/providers/index.js';
 import { runReview, type ReviewResult } from './index.js';
@@ -23,6 +24,8 @@ interface CLIArgs {
   repo?: string;
   output?: 'json' | 'markdown';
   help?: boolean;
+  diff?: boolean;
+  title?: string;
 }
 
 interface CLIOutput {
@@ -46,7 +49,7 @@ interface CLIOutput {
   hint?: string;
 }
 
-function parseArgs(argv: string[]): CLIArgs {
+export function parseArgs(argv: string[]): CLIArgs {
   const args: CLIArgs = {};
 
   for (let i = 2; i < argv.length; i++) {
@@ -64,6 +67,10 @@ function parseArgs(argv: string[]): CLIArgs {
       if (value === 'json' || value === 'markdown') {
         args.output = value;
       }
+    } else if (arg === '--diff' || arg === '-d') {
+      args.diff = true;
+    } else if (arg === '--title' || arg === '-t') {
+      args.title = argv[++i];
     }
   }
 
@@ -235,4 +242,45 @@ async function main(): Promise<void> {
   }
 }
 
-main();
+export function parseDiffToFileChanges(diff: string): FileChange[] {
+  if (!diff.trim()) return [];
+
+  const fileSections = diff.split(/^(?=diff --git )/m).filter(s => s.trim());
+  const files: FileChange[] = [];
+
+  for (const section of fileSections) {
+    const headerMatch = section.match(/^diff --git a\/.+ b\/(.+)$/m);
+    if (!headerMatch) continue;
+
+    const filename = headerMatch[1];
+
+    let status: FileChange['status'] = 'modified';
+    if (/^new file mode/m.test(section)) {
+      status = 'added';
+    } else if (/^deleted file mode/m.test(section)) {
+      status = 'removed';
+    } else if (/^rename from/m.test(section)) {
+      status = 'renamed';
+    }
+
+    let additions = 0;
+    let deletions = 0;
+
+    const lines = section.split('\n');
+    for (const line of lines) {
+      if (line.startsWith('+++') || line.startsWith('---')) continue;
+      if (line.startsWith('+')) additions++;
+      else if (line.startsWith('-') && !line.startsWith('diff --git')) deletions++;
+    }
+
+    files.push({ filename, status, additions, deletions });
+  }
+
+  return files;
+}
+
+// Only run main() when executed directly, not when imported
+const isDirectExecution = process.argv[1]?.endsWith('/cli.js') || process.argv[1]?.endsWith('/cli.ts');
+if (isDirectExecution) {
+  main();
+}
