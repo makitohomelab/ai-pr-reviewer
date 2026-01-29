@@ -54,6 +54,23 @@ describe('parseArgs', () => {
   it('-r short form works for repo', () => {
     expect(parseArgs(argv('-r', 'a/b'))).toMatchObject({ repo: 'a/b' });
   });
+
+  it('--eval sets eval: true', () => {
+    expect(parseArgs(argv('--eval'))).toMatchObject({ eval: true });
+  });
+
+  it('-e short form works', () => {
+    expect(parseArgs(argv('-e'))).toMatchObject({ eval: true });
+  });
+
+  it('--benchmark sets benchmark: true', () => {
+    expect(parseArgs(argv('--benchmark'))).toMatchObject({ benchmark: true });
+  });
+
+  it('--eval with --pr combines correctly', () => {
+    const result = parseArgs(argv('--pr', '42', '--repo', 'a/b', '--eval'));
+    expect(result).toMatchObject({ pr: 42, repo: 'a/b', eval: true });
+  });
 });
 
 describe('parseDiffToFileChanges', () => {

@@ -1,0 +1,875 @@
+diff --git a/.claude/context/qwen-prompts.md b/.claude/context/qwen-prompts.md
+index 40f0efd..f12be85 100644
+--- a/.claude/context/qwen-prompts.md
++++ b/.claude/context/qwen-prompts.md
+@@ -2,6 +2,24 @@
+ 
+ Optimized instruction fragments for Qwen 2.5 Coder in the ai-pr-reviewer context.
+ 
++## Global Review Rules (ALL AGENTS)
++
++CRITICAL GROUNDING RULES:
++1. ONLY reference files that appear in the diff. Never invent file paths.
++2. When citing a file, use the EXACT filename from the diff header (e.g., `src/agents/base-agent.ts`)
++3. Line numbers MUST come from the diff patch. If you can't find a specific line, omit the `line` field.
++4. Every finding must reference specific code from the diff. Do not make generic suggestions.
++5. If the diff doesn't contain issues in your focus area, return an empty findings array. Don't force findings.
++
++BAD EXAMPLES (do NOT do this):
++- Citing `.env:10` when `.env` is not in the diff
++- Citing `src/controllers/userController.js:42` when that file doesn't exist
++- "Ensure this aligns with the architecture" — too vague, cite specific code
++
++GOOD EXAMPLES:
++- `{"file": "src/agents/base-agent.ts", "line": 297, "message": "JSON.parse fallback is unwrapped..."}`
++- `{"message": "New agent added without corresponding test file"}` (no file field — general finding)
++
+ ## Security Agent Preamble
+ 
+ This codebase handles LLM API calls and GitHub integrations.
+diff --git a/src/__tests__/pipeline.integration.test.ts b/src/__tests__/pipeline.integration.test.ts
+new file mode 100644
+index 0000000..0f1a084
+--- /dev/null
++++ b/src/__tests__/pipeline.integration.test.ts
+@@ -0,0 +1,182 @@
++import { describe, it, expect, vi } from 'vitest';
++import { PipelineOrchestrator } from '../pipeline/pipeline-orchestrator.js';
++import { filterUngroundedFindings } from '../pipeline/result-aggregator.js';
++import type { ModelProvider } from '../lib/model-provider.js';
++import type { BaseContext, PRDelta } from '../context/index.js';
++import type { FileChange } from '../lib/github.js';
++import type { AgentFinding } from '../agents/base-agent.js';
++
++function createMockProvider(response: string): ModelProvider {
++  return {
++    name: 'mock',
++    defaultModel: 'mock-model',
++    chat: vi.fn().mockResolvedValue({
++      content: response,
++      usage: { inputTokens: 100, outputTokens: 50 },
++    }),
++    healthCheck: vi.fn().mockResolvedValue(true),
++    getModelName: vi.fn().mockReturnValue('mock-model'),
++  };
++}
++
++const sampleContext: BaseContext = {
++  repoPatterns: '',
++  structuredPatterns: [],
++  qwenPrompts: {
++    securityPreamble: '',
++    breakingPreamble: '',
++    testCoveragePreamble: '',
++    performancePreamble: '',
++    codebaseQualityPreamble: '',
++  },
++  hasCustomContext: false,
++};
++
++const sampleDelta: PRDelta = {
++  changeSignature: 'test',
++  riskFactors: [],
++  changedPatterns: [],
++  fileCategories: [],
++};
++
++const sampleFiles: FileChange[] = [
++  {
++    filename: 'src/foo.ts',
++    status: 'modified',
++    additions: 5,
++    deletions: 2,
++    patch: '@@ -1,5 +1,8 @@\n+added line',
++  },
++];
++
++const validAgentResponse = JSON.stringify({
++  findings: [
++    {
++      priority: 'medium',
++      category: 'test',
++      message: 'Test finding',
++      file: 'src/foo.ts',
++    },
++  ],
++  summary: 'Test summary',
++  confidence: 0.8,
++});
++
++describe('Pipeline Integration Tests', () => {
++  describe('PipelineOrchestrator', () => {
++    it('should aggregate findings from all agents when they return valid JSON', async () => {
++      const provider = createMockProvider(validAgentResponse);
++      const pipeline = new PipelineOrchestrator(provider);
++
++      const result = await pipeline.run(
++        sampleFiles,
++        'Test PR',
++        'Test body',
++        sampleContext,
++        sampleDelta
++      );
++
++      expect(result.findings.length).toBe(5);
++      expect(result.findings.every((f: AgentFinding) => f.priority === 'medium')).toBe(true);
++      expect(provider.chat).toHaveBeenCalledTimes(5);
++    });
++
++    it('should continue pipeline when one agent returns malformed JSON', async () => {
++      const mockChat = vi
++        .fn()
++        .mockResolvedValueOnce({
++          content: validAgentResponse,
++          usage: { inputTokens: 100, outputTokens: 50 },
++        })
++        .mockResolvedValueOnce({
++          content: 'not valid json at all',
++          usage: { inputTokens: 100, outputTokens: 50 },
++        })
++        .mockResolvedValueOnce({
++          content: validAgentResponse,
++          usage: { inputTokens: 100, outputTokens: 50 },
++        })
++        .mockResolvedValueOnce({
++          content: validAgentResponse,
++          usage: { inputTokens: 100, outputTokens: 50 },
++        })
++        .mockResolvedValueOnce({
++          content: validAgentResponse,
++          usage: { inputTokens: 100, outputTokens: 50 },
++        });
++
++      const provider: ModelProvider = {
++        name: 'mock',
++        defaultModel: 'mock-model',
++        chat: mockChat,
++        healthCheck: vi.fn().mockResolvedValue(true),
++        getModelName: vi.fn().mockReturnValue('mock-model'),
++      };
++
++      const pipeline = new PipelineOrchestrator(provider);
++
++      const result = await pipeline.run(
++        sampleFiles,
++        'Test PR',
++        'Test body',
++        sampleContext,
++        sampleDelta
++      );
++
++      expect(result.findings.length).toBe(4);
++      expect(mockChat).toHaveBeenCalledTimes(5);
++    });
++
++    it('should return empty findings when all agents return garbage', async () => {
++      const provider = createMockProvider('complete garbage response');
++      const pipeline = new PipelineOrchestrator(provider);
++
++      const result = await pipeline.run(
++        sampleFiles,
++        'Test PR',
++        'Test body',
++        sampleContext,
++        sampleDelta
++      );
++
++      expect(result.findings).toHaveLength(0);
++      expect(provider.chat).toHaveBeenCalledTimes(5);
++    });
++  });
++
++  describe('filterUngroundedFindings', () => {
++    it('should keep findings with matching files and drop nonexistent files', () => {
++      const findings: AgentFinding[] = [
++        { agent: 'test', priority: 'high', category: 'test', message: 'Valid', file: 'src/foo.ts' },
++        { agent: 'test', priority: 'medium', category: 'test', message: 'Invalid', file: 'nonexistent.ts' },
++        { agent: 'test', priority: 'medium', category: 'test', message: 'No file' },
++      ];
++
++      const filtered = filterUngroundedFindings(findings, sampleFiles);
++
++      expect(filtered).toHaveLength(2);
++      expect(filtered[0].file).toBe('src/foo.ts');
++      expect(filtered[1].file).toBeUndefined();
++    });
++
++    it('should keep all findings when no files specified in findings', () => {
++      const findings: AgentFinding[] = [
++        { agent: 'test', priority: 'high', category: 'test', message: 'Finding 1' },
++        { agent: 'test', priority: 'medium', category: 'test', message: 'Finding 2' },
++      ];
++
++      const filtered = filterUngroundedFindings(findings, sampleFiles);
++      expect(filtered).toHaveLength(2);
++    });
++
++    it('should return empty when all findings reference nonexistent files', () => {
++      const findings: AgentFinding[] = [
++        { agent: 'test', priority: 'high', category: 'test', message: 'Bad 1', file: 'nope.ts' },
++        { agent: 'test', priority: 'medium', category: 'test', message: 'Bad 2', file: 'nah.ts' },
++      ];
++
++      const filtered = filterUngroundedFindings(findings, sampleFiles);
++      expect(filtered).toHaveLength(0);
++    });
++  });
++});
+diff --git a/src/agents/__tests__/parse-response.test.ts b/src/agents/__tests__/parse-response.test.ts
+new file mode 100644
+index 0000000..0ca27ff
+--- /dev/null
++++ b/src/agents/__tests__/parse-response.test.ts
+@@ -0,0 +1,215 @@
++import { describe, it, expect } from 'vitest';
++import { parseCommonResponse } from '../base-agent.js';
++
++describe('parseCommonResponse', () => {
++  it('should parse valid JSON with findings and set agent name', () => {
++    const response = JSON.stringify({
++      findings: [
++        {
++          priority: 'high',
++          category: 'security',
++          file: 'src/auth.ts',
++          line: 42,
++          message: 'Potential SQL injection',
++          suggestion: 'Use parameterized queries',
++        },
++        {
++          priority: 'medium',
++          category: 'performance',
++          message: 'Inefficient loop',
++        },
++      ],
++      summary: 'Found 2 issues',
++      confidence: 0.9,
++    });
++
++    const result = parseCommonResponse(response, 'TestAgent');
++
++    expect(result.findings).toHaveLength(2);
++    expect(result.findings[0].agent).toBe('TestAgent');
++    expect(result.findings[0].priority).toBe('high');
++    expect(result.findings[0].category).toBe('security');
++    expect(result.findings[0].file).toBe('src/auth.ts');
++    expect(result.findings[0].line).toBe(42);
++    expect(result.findings[0].message).toBe('Potential SQL injection');
++    expect(result.findings[0].suggestion).toBe('Use parameterized queries');
++    expect(result.findings[1].agent).toBe('TestAgent');
++    expect(result.findings[1].priority).toBe('medium');
++    expect(result.summary).toBe('Found 2 issues');
++    expect(result.confidence).toBe(0.9);
++  });
++
++  it('should extract JSON wrapped in markdown code blocks', () => {
++    const response = `Here is my analysis:
++
++\`\`\`json
++{
++  "findings": [
++    {
++      "priority": "critical",
++      "category": "security",
++      "message": "Hardcoded credentials"
++    }
++  ],
++  "summary": "Critical security issue found",
++  "confidence": 0.95
++}
++\`\`\`
++
++Hope this helps!`;
++
++    const result = parseCommonResponse(response, 'SecurityAgent');
++
++    expect(result.findings).toHaveLength(1);
++    expect(result.findings[0].agent).toBe('SecurityAgent');
++    expect(result.findings[0].priority).toBe('critical');
++    expect(result.findings[0].message).toBe('Hardcoded credentials');
++    expect(result.summary).toBe('Critical security issue found');
++    expect(result.confidence).toBe(0.95);
++  });
++
++  it('should handle truncated/malformed JSON gracefully', () => {
++    const response = '{"findings": [{"priority": "high"}] invalid}';
++
++    const result = parseCommonResponse(response, 'TestAgent');
++
++    expect(result.findings).toEqual([]);
++    expect(result.summary).toBe('Failed to parse agent response (malformed JSON)');
++    expect(result.confidence).toBe(0);
++  });
++
++  it('should handle plain text with no JSON', () => {
++    const response = 'This is just plain text without any JSON structure.';
++
++    const result = parseCommonResponse(response, 'TestAgent');
++
++    expect(result.findings).toEqual([]);
++    expect(result.summary).toBe('Failed to parse agent response (no JSON found)');
++    expect(result.confidence).toBe(0);
++  });
++
++  it('should extract JSON with surrounding text', () => {
++    const response = `Here is my analysis: {"findings": [{"priority": "high", "category": "bug", "message": "Null pointer"}], "summary": "Found issue", "confidence": 0.85} hope this helps`;
++
++    const result = parseCommonResponse(response, 'TestAgent');
++
++    expect(result.findings).toHaveLength(1);
++    expect(result.findings[0].priority).toBe('high');
++    expect(result.findings[0].message).toBe('Null pointer');
++    expect(result.summary).toBe('Found issue');
++    expect(result.confidence).toBe(0.85);
++  });
++
++  it('should handle empty string gracefully', () => {
++    const response = '';
++
++    const result = parseCommonResponse(response, 'TestAgent');
++
++    expect(result.findings).toEqual([]);
++    expect(result.summary).toBe('Failed to parse agent response (no JSON found)');
++    expect(result.confidence).toBe(0);
++  });
++
++  it('should handle valid JSON with empty findings array', () => {
++    const response = JSON.stringify({
++      findings: [],
++      summary: 'No issues found in this PR',
++      confidence: 1.0,
++    });
++
++    const result = parseCommonResponse(response, 'TestAgent');
++
++    expect(result.findings).toEqual([]);
++    expect(result.summary).toBe('No issues found in this PR');
++    expect(result.confidence).toBe(1.0);
++  });
++
++  it('should limit findings to 5 max', () => {
++    const response = JSON.stringify({
++      findings: Array.from({ length: 10 }, (_, i) => ({
++        priority: 'medium',
++        category: 'style',
++        message: `Issue ${i + 1}`,
++      })),
++      summary: 'Found 10 issues',
++      confidence: 0.8,
++    });
++
++    const result = parseCommonResponse(response, 'TestAgent');
++
++    expect(result.findings).toHaveLength(5);
++  });
++
++  it('should normalize invalid priority to medium', () => {
++    const response = JSON.stringify({
++      findings: [
++        { priority: 'invalid', category: 'test', message: 'Test message' },
++        { priority: 'low', category: 'test', message: 'Test message 2' },
++        { category: 'test', message: 'Test message 3' },
++      ],
++      summary: 'Test',
++      confidence: 0.5,
++    });
++
++    const result = parseCommonResponse(response, 'TestAgent');
++
++    expect(result.findings).toHaveLength(3);
++    expect(result.findings[0].priority).toBe('medium');
++    expect(result.findings[1].priority).toBe('medium');
++    expect(result.findings[2].priority).toBe('medium');
++  });
++
++  it('should provide defaults for missing fields', () => {
++    const response = JSON.stringify({
++      findings: [
++        { priority: 'high' }, // Missing category and message
++      ],
++      // Missing summary
++      confidence: 0.7,
++    });
++
++    const result = parseCommonResponse(response, 'TestAgent');
++
++    expect(result.findings).toHaveLength(1);
++    expect(result.findings[0].category).toBe('general');
++    expect(result.findings[0].message).toBe('No details');
++    expect(result.summary).toBe('Analysis complete');
++    expect(result.confidence).toBe(0.7);
++  });
++
++  it('should clamp confidence to 0-1 range', () => {
++    const response1 = JSON.stringify({
++      findings: [],
++      summary: 'Test',
++      confidence: 1.5,
++    });
++
++    const response2 = JSON.stringify({
++      findings: [],
++      summary: 'Test',
++      confidence: -0.5,
++    });
++
++    const result1 = parseCommonResponse(response1, 'TestAgent');
++    const result2 = parseCommonResponse(response2, 'TestAgent');
++
++    expect(result1.confidence).toBe(1);
++    expect(result2.confidence).toBe(0);
++  });
++
++  it('should handle invalid line numbers', () => {
++    const response = JSON.stringify({
++      findings: [
++        { priority: 'high', category: 'test', message: 'Test', line: 'invalid' },
++        { priority: 'high', category: 'test', message: 'Test 2', line: null },
++      ],
++      summary: 'Test',
++      confidence: 0.8,
++    });
++
++    const result = parseCommonResponse(response, 'TestAgent');
++
++    expect(result.findings[0].line).toBeUndefined();
++    expect(result.findings[1].line).toBeUndefined();
++  });
++});
+diff --git a/src/agents/base-agent.ts b/src/agents/base-agent.ts
+index a2246e1..d57be82 100644
+--- a/src/agents/base-agent.ts
++++ b/src/agents/base-agent.ts
+@@ -294,11 +294,19 @@ export function parseCommonResponse(
+     // Try to extract JSON from response
+     const jsonMatch = response.match(/\{[\s\S]*\}/);
+     if (jsonMatch) {
+-      parsed = JSON.parse(jsonMatch[0]);
++      try {
++        parsed = JSON.parse(jsonMatch[0]);
++      } catch {
++        return {
++          findings: [],
++          summary: 'Failed to parse agent response (malformed JSON)',
++          confidence: 0,
++        };
++      }
+     } else {
+       return {
+         findings: [],
+-        summary: 'Failed to parse response',
++        summary: 'Failed to parse agent response (no JSON found)',
+         confidence: 0,
+       };
+     }
+diff --git a/src/cli.test.ts b/src/cli.test.ts
+new file mode 100644
+index 0000000..d02f69a
+--- /dev/null
++++ b/src/cli.test.ts
+@@ -0,0 +1,221 @@
++import { describe, it, expect } from 'vitest';
++import { parseArgs, parseDiffToFileChanges } from './cli.js';
++
++describe('parseArgs', () => {
++  // Helper: simulate process.argv with first two entries
++  const argv = (...args: string[]) => ['node', 'cli.js', ...args];
++
++  it('--diff sets diff: true', () => {
++    expect(parseArgs(argv('--diff'))).toMatchObject({ diff: true });
++  });
++
++  it('-d short form works', () => {
++    expect(parseArgs(argv('-d'))).toMatchObject({ diff: true });
++  });
++
++  it('--diff --title sets both fields', () => {
++    const result = parseArgs(argv('--diff', '--title', 'my changes'));
++    expect(result).toMatchObject({ diff: true, title: 'my changes' });
++  });
++
++  it('-t short form works', () => {
++    expect(parseArgs(argv('-t', 'foo'))).toMatchObject({ title: 'foo' });
++  });
++
++  it('--diff with --output json combines correctly', () => {
++    const result = parseArgs(argv('--diff', '--output', 'json'));
++    expect(result).toMatchObject({ diff: true, output: 'json' });
++  });
++
++  it('--diff without --pr/--repo is valid', () => {
++    const result = parseArgs(argv('--diff'));
++    expect(result.pr).toBeUndefined();
++    expect(result.repo).toBeUndefined();
++    expect(result.diff).toBe(true);
++  });
++
++  it('existing PR mode args still work', () => {
++    const result = parseArgs(argv('--pr', '42', '--repo', 'owner/repo', '--output', 'markdown'));
++    expect(result).toMatchObject({ pr: 42, repo: 'owner/repo', output: 'markdown' });
++  });
++
++  it('--help sets help: true', () => {
++    expect(parseArgs(argv('--help'))).toMatchObject({ help: true });
++  });
++
++  it('-h short form works', () => {
++    expect(parseArgs(argv('-h'))).toMatchObject({ help: true });
++  });
++
++  it('-p short form works for PR number', () => {
++    expect(parseArgs(argv('-p', '10'))).toMatchObject({ pr: 10 });
++  });
++
++  it('-r short form works for repo', () => {
++    expect(parseArgs(argv('-r', 'a/b'))).toMatchObject({ repo: 'a/b' });
++  });
++});
++
++describe('parseDiffToFileChanges', () => {
++  it('single modified file', () => {
++    const diff = `diff --git a/src/app.ts b/src/app.ts
++index 1234567..abcdefg 100644
++--- a/src/app.ts
+++++ b/src/app.ts
++@@ -1,3 +1,4 @@
++ const a = 1;
+++const b = 2;
++-const c = 3;
++ const d = 4;
++`;
++    const files = parseDiffToFileChanges(diff);
++    expect(files).toHaveLength(1);
++    expect(files[0].filename).toBe('src/app.ts');
++    expect(files[0].status).toBe('modified');
++    expect(files[0].additions).toBe(1);
++    expect(files[0].deletions).toBe(1);
++  });
++
++  it('new file → status: added', () => {
++    const diff = `diff --git a/src/new.ts b/src/new.ts
++new file mode 100644
++index 0000000..abcdefg
++--- /dev/null
+++++ b/src/new.ts
++@@ -0,0 +1,2 @@
+++const x = 1;
+++const y = 2;
++`;
++    const files = parseDiffToFileChanges(diff);
++    expect(files).toHaveLength(1);
++    expect(files[0].status).toBe('added');
++    expect(files[0].additions).toBe(2);
++    expect(files[0].deletions).toBe(0);
++  });
++
++  it('deleted file → status: removed', () => {
++    const diff = `diff --git a/src/old.ts b/src/old.ts
++deleted file mode 100644
++index abcdefg..0000000
++--- a/src/old.ts
+++++ /dev/null
++@@ -1,2 +0,0 @@
++-const x = 1;
++-const y = 2;
++`;
++    const files = parseDiffToFileChanges(diff);
++    expect(files).toHaveLength(1);
++    expect(files[0].status).toBe('removed');
++    expect(files[0].deletions).toBe(2);
++    expect(files[0].additions).toBe(0);
++  });
++
++  it('renamed file → status: renamed', () => {
++    const diff = `diff --git a/src/old.ts b/src/new.ts
++similarity index 90%
++rename from src/old.ts
++rename to src/new.ts
++index 1234567..abcdefg 100644
++--- a/src/old.ts
+++++ b/src/new.ts
++@@ -1,2 +1,2 @@
++ const x = 1;
++-const y = 2;
+++const y = 3;
++`;
++    const files = parseDiffToFileChanges(diff);
++    expect(files).toHaveLength(1);
++    expect(files[0].status).toBe('renamed');
++    expect(files[0].filename).toBe('src/new.ts');
++  });
++
++  it('multiple files in one diff', () => {
++    const diff = `diff --git a/a.ts b/a.ts
++index 1234..5678 100644
++--- a/a.ts
+++++ b/a.ts
++@@ -1 +1,2 @@
++ line1
+++line2
++diff --git a/b.ts b/b.ts
++index abcd..efgh 100644
++--- a/b.ts
+++++ b/b.ts
++@@ -1 +1,2 @@
++ line1
+++line2
++`;
++    const files = parseDiffToFileChanges(diff);
++    expect(files).toHaveLength(2);
++    expect(files[0].filename).toBe('a.ts');
++    expect(files[1].filename).toBe('b.ts');
++  });
++
++  it('empty string → returns []', () => {
++    expect(parseDiffToFileChanges('')).toEqual([]);
++  });
++
++  it('malformed diff (no diff --git header) → returns []', () => {
++    expect(parseDiffToFileChanges('just some random text\nwith lines\n')).toEqual([]);
++  });
++
++  it('+++/--- lines not counted as additions/deletions', () => {
++    const diff = `diff --git a/f.ts b/f.ts
++index 1234..5678 100644
++--- a/f.ts
+++++ b/f.ts
++@@ -1,2 +1,2 @@
++-old line
+++new line
++`;
++    const files = parseDiffToFileChanges(diff);
++    expect(files[0].additions).toBe(1);
++    expect(files[0].deletions).toBe(1);
++  });
++
++  it('binary file (no hunk content) → 0 additions, 0 deletions', () => {
++    const diff = `diff --git a/image.png b/image.png
++index 1234..5678 100644
++Binary files a/image.png and b/image.png differ
++`;
++    const files = parseDiffToFileChanges(diff);
++    expect(files).toHaveLength(1);
++    expect(files[0].additions).toBe(0);
++    expect(files[0].deletions).toBe(0);
++  });
++
++  it('multi-hunk diff → correct totals', () => {
++    const diff = `diff --git a/f.ts b/f.ts
++index 1234..5678 100644
++--- a/f.ts
+++++ b/f.ts
++@@ -1,3 +1,4 @@
++ line1
+++added1
++ line2
++ line3
++@@ -10,3 +11,4 @@
++ line10
+++added2
+++added3
++-removed1
++ line11
++`;
++    const files = parseDiffToFileChanges(diff);
++    expect(files[0].additions).toBe(3);
++    expect(files[0].deletions).toBe(1);
++  });
++
++  it('extracts filename from b/ path', () => {
++    const diff = `diff --git a/path/to/file.ts b/path/to/file.ts
++index 1234..5678 100644
++--- a/path/to/file.ts
+++++ b/path/to/file.ts
++@@ -1 +1,2 @@
++ x
+++y
++`;
++    const files = parseDiffToFileChanges(diff);
++    expect(files[0].filename).toBe('path/to/file.ts');
++  });
++});
+diff --git a/src/cli.ts b/src/cli.ts
+index aea1502..2f11fbb 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -14,6 +14,7 @@ import {
+   createGitHubClient,
+   getPRDiff,
+   type PRContext,
++  type FileChange,
+ } from './lib/github.js';
+ import { createProvider } from './lib/providers/index.js';
+ import { runReview, type ReviewResult } from './index.js';
+@@ -23,6 +24,8 @@ interface CLIArgs {
+   repo?: string;
+   output?: 'json' | 'markdown';
+   help?: boolean;
++  diff?: boolean;
++  title?: string;
+ }
+ 
+ interface CLIOutput {
+@@ -46,7 +49,7 @@ interface CLIOutput {
+   hint?: string;
+ }
+ 
+-function parseArgs(argv: string[]): CLIArgs {
++export function parseArgs(argv: string[]): CLIArgs {
+   const args: CLIArgs = {};
+ 
+   for (let i = 2; i < argv.length; i++) {
+@@ -64,6 +67,10 @@ function parseArgs(argv: string[]): CLIArgs {
+       if (value === 'json' || value === 'markdown') {
+         args.output = value;
+       }
++    } else if (arg === '--diff' || arg === '-d') {
++      args.diff = true;
++    } else if (arg === '--title' || arg === '-t') {
++      args.title = argv[++i];
+     }
+   }
+ 
+@@ -235,4 +242,45 @@ async function main(): Promise<void> {
+   }
+ }
+ 
+-main();
++export function parseDiffToFileChanges(diff: string): FileChange[] {
++  if (!diff.trim()) return [];
++
++  const fileSections = diff.split(/^(?=diff --git )/m).filter(s => s.trim());
++  const files: FileChange[] = [];
++
++  for (const section of fileSections) {
++    const headerMatch = section.match(/^diff --git a\/.+ b\/(.+)$/m);
++    if (!headerMatch) continue;
++
++    const filename = headerMatch[1];
++
++    let status: FileChange['status'] = 'modified';
++    if (/^new file mode/m.test(section)) {
++      status = 'added';
++    } else if (/^deleted file mode/m.test(section)) {
++      status = 'removed';
++    } else if (/^rename from/m.test(section)) {
++      status = 'renamed';
++    }
++
++    let additions = 0;
++    let deletions = 0;
++
++    const lines = section.split('\n');
++    for (const line of lines) {
++      if (line.startsWith('+++') || line.startsWith('---')) continue;
++      if (line.startsWith('+')) additions++;
++      else if (line.startsWith('-') && !line.startsWith('diff --git')) deletions++;
++    }
++
++    files.push({ filename, status, additions, deletions });
++  }
++
++  return files;
++}
++
++// Only run main() when executed directly, not when imported
++const isDirectExecution = process.argv[1]?.endsWith('/cli.js') || process.argv[1]?.endsWith('/cli.ts');
++if (isDirectExecution) {
++  main();
++}
+diff --git a/src/index.ts b/src/index.ts
+index 68f27c1..610a043 100644
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -109,8 +109,8 @@ export async function runReview(
+     prDelta
+   );
+ 
+-  // Aggregate results
+-  const aggregated = aggregateResults(pipelineResult);
++  // Aggregate results (pass diff files to filter hallucinated file references)
++  const aggregated = aggregateResults(pipelineResult, reviewableFiles);
+ 
+   return {
+     pipeline: pipelineResult,
+diff --git a/src/pipeline/index.ts b/src/pipeline/index.ts
+index 77b7b90..8b11327 100644
+--- a/src/pipeline/index.ts
++++ b/src/pipeline/index.ts
+@@ -14,6 +14,7 @@ export {
+ 
+ export {
+   aggregateResults,
++  filterUngroundedFindings,
+   formatAsMarkdown,
+   formatAsCompactSummary,
+   type AggregatedResult,
+diff --git a/src/pipeline/result-aggregator.ts b/src/pipeline/result-aggregator.ts
+index f4eeb5d..ab70e4b 100644
+--- a/src/pipeline/result-aggregator.ts
++++ b/src/pipeline/result-aggregator.ts
+@@ -6,6 +6,7 @@
+  */
+ 
+ import type { AgentFinding, AgentOutput } from '../agents/base-agent.js';
++import type { FileChange } from '../lib/github.js';
+ import type { PipelineResult } from './pipeline-orchestrator.js';
+ import { deduplicateFindings } from '../lib/deduplication.js';
+ 
+@@ -84,12 +85,54 @@ function checkEscalation(
+   };
+ }
+ 
++/**
++ * Filter out findings that reference files not present in the PR diff.
++ */
++export function filterUngroundedFindings(
++  findings: AgentFinding[],
++  diffFiles: FileChange[],
++  verbose = false
++): AgentFinding[] {
++  if (diffFiles.length === 0) return findings;
++
++  const diffFilenames = new Set(diffFiles.map((f) => f.filename));
++  const filtered: AgentFinding[] = [];
++  let droppedCount = 0;
++
++  for (const finding of findings) {
++    if (!finding.file || diffFilenames.has(finding.file)) {
++      filtered.push(finding);
++    } else {
++      droppedCount++;
++    }
++  }
++
++  if (verbose && droppedCount > 0) {
++    console.log(`   Dropped ${droppedCount} finding(s) referencing files not in the diff`);
++  }
++
++  return filtered;
++}
++
+ /**
+  * Aggregate pipeline results into final format.
+  */
+-export function aggregateResults(result: PipelineResult): AggregatedResult {
++export function aggregateResults(
++  result: PipelineResult,
++  diffFiles?: FileChange[]
++): AggregatedResult {
++  // Filter ungrounded findings if diff files provided
++  let findings = result.findings;
++  if (diffFiles && diffFiles.length > 0) {
++    findings = filterUngroundedFindings(
++      findings,
++      diffFiles,
++      process.env.DEBUG_AI_REVIEW === 'true'
++    );
++  }
++
+   // Deduplicate and sort findings
+-  const deduplicated = deduplicateFindings(result.findings);
++  const deduplicated = deduplicateFindings(findings);
+   const sorted = sortFindings(deduplicated);
+ 
+   // Limit to top findings

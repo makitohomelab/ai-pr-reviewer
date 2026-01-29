@@ -1,0 +1,11 @@
+{
+  "name": "clean-refactor",
+  "title": "refactor: Rename formatMs to formatDuration",
+  "description": "Clean rename refactor with no issues. Expected: 0 findings.",
+  "minFindings": 0,
+  "maxFindings": 0,
+  "diffFiles": [
+    "src/lib/format.ts"
+  ],
+  "unexpectedCategories": []
+}

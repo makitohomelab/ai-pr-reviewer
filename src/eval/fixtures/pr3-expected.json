@@ -1,0 +1,11 @@
+{
+  "name": "pr3-deliberate-issues",
+  "title": "Add debug utilities with intentional issues",
+  "description": "PR #3 added debug-utils.ts with deliberate issues: API key logging (partial), sequential await in loop (N+1), missing try-catch in retry loop. Expected: agents should find the security issue (key logging) and possibly the performance issue.",
+  "minFindings": 1,
+  "maxFindings": 5,
+  "diffFiles": [
+    "src/lib/debug-utils.ts"
+  ],
+  "unexpectedCategories": ["csrf", "xss", "breaking-change"]
+}

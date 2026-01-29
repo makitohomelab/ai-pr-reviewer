@@ -1,0 +1,19 @@
+{
+  "name": "pr6-robustness",
+  "title": "feat: Add response parsing robustness, finding validation, and CLI diff tools",
+  "description": "PR #6 added JSON parsing robustness, finding validation, and diff-mode CLI. This is internal tooling with no user-facing security surface. Expected: 0-2 real findings.",
+  "minFindings": 0,
+  "maxFindings": 2,
+  "diffFiles": [
+    ".claude/context/qwen-prompts.md",
+    "src/__tests__/pipeline.integration.test.ts",
+    "src/agents/__tests__/parse-response.test.ts",
+    "src/agents/base-agent.ts",
+    "src/cli.test.ts",
+    "src/cli.ts",
+    "src/index.ts",
+    "src/pipeline/index.ts",
+    "src/pipeline/result-aggregator.ts"
+  ],
+  "unexpectedCategories": ["csrf", "xss", "deserialization", "sql-injection"]
+}

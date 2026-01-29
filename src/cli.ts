@@ -26,6 +26,8 @@ interface CLIArgs {
   help?: boolean;
   diff?: boolean;
   title?: string;
+  eval?: boolean;
+  benchmark?: boolean;
 }
 
 interface CLIOutput {
@@ -71,6 +73,10 @@ export function parseArgs(argv: string[]): CLIArgs {
       args.diff = true;
     } else if (arg === '--title' || arg === '-t') {
       args.title = argv[++i];
+    } else if (arg === '--eval' || arg === '-e') {
+      args.eval = true;
+    } else if (arg === '--benchmark') {
+      args.benchmark = true;
     }
   }
 
@@ -83,20 +89,28 @@ AI PR Reviewer CLI
 
 Usage:
   ai-review --pr <number> --repo <owner/repo> [options]
+  ai-review --diff --title "PR title" [--eval]
+  ai-review --benchmark
 
 Options:
-  -p, --pr <number>     PR number to review (required)
-  -r, --repo <owner/repo>  Repository (required)
+  -p, --pr <number>        PR number to review (required for PR mode)
+  -r, --repo <owner/repo>  Repository (required for PR mode)
   -o, --output <format>    Output format: json (default) or markdown
-  -h, --help              Show this help message
+  -d, --diff               Read diff from stdin
+  -t, --title <title>      PR title (used with --diff)
+  -e, --eval               Run quality evaluation on results
+  --benchmark              Run all benchmark fixtures
+  -h, --help               Show this help message
 
 Environment:
-  GITHUB_TOKEN          GitHub token for API access (required)
+  GITHUB_TOKEN          GitHub token for API access (required for PR mode)
   OLLAMA_URL            Ollama server URL (default: http://localhost:11434)
 
 Examples:
   ai-review --pr 42 --repo myorg/myrepo
   ai-review --pr 42 --repo myorg/myrepo --output markdown
+  cat pr.diff | ai-review --diff --title "My PR" --eval
+  ai-review --benchmark
 `);
 }
 
@@ -112,12 +126,131 @@ function outputError(error: string, hint?: string): void {
   });
 }
 
+async function runBenchmark(): Promise<void> {
+  const { readFileSync, readdirSync } = await import('fs');
+  const { join, dirname } = await import('path');
+  const { fileURLToPath } = await import('url');
+  const { evaluateFindings, formatEvalReport } = await import('./eval/index.js');
+  const { loadBaseContext, generatePRDelta } = await import('./context/index.js');
+  const { createPipeline, aggregateResults } = await import('./pipeline/index.js');
+  const provider = createProvider();
+  const providerReady = await provider.healthCheck();
+  if (!providerReady) {
+    console.error(`Provider '${provider.name}' is not available.`);
+    process.exit(1);
+  }
+
+  // Find fixtures
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  const fixturesDir = join(__dirname, 'eval', 'fixtures');
+
+  let expectedFiles: string[];
+  try {
+    expectedFiles = readdirSync(fixturesDir).filter((f: string) => f.endsWith('-expected.json'));
+  } catch {
+    // Try from dist/
+    const distFixtures = join(__dirname, '..', 'src', 'eval', 'fixtures');
+    expectedFiles = readdirSync(distFixtures).filter((f: string) => f.endsWith('-expected.json'));
+  }
+
+  console.log(`\n=== Benchmark Suite ===`);
+  console.log(`Found ${expectedFiles.length} fixtures\n`);
+
+  const results: Array<{ name: string; score: number; findings: number; pass: boolean }> = [];
+
+  for (const expectedFile of expectedFiles) {
+    const expectedPath = join(fixturesDir, expectedFile);
+    const expected: {
+      name: string; title: string; description: string;
+      minFindings: number; maxFindings: number;
+      diffFiles: string[]; unexpectedCategories?: string[];
+    } = JSON.parse(readFileSync(expectedPath, 'utf-8'));
+
+    // Find corresponding diff file
+    const diffFile = expectedFile.replace('-expected.json', '.diff');
+    const diffPath = join(fixturesDir, diffFile);
+
+    let diffContent: string;
+    try {
+      diffContent = readFileSync(diffPath, 'utf-8');
+    } catch {
+      console.log(`  SKIP ${expected.name}: diff file not found (${diffFile})`);
+      continue;
+    }
+
+    console.log(`--- ${expected.name} ---`);
+    console.log(`  Title: ${expected.title}`);
+
+    const files = parseDiffToFileChanges(diffContent);
+    const baseContext = await loadBaseContext(process.cwd());
+    const prDelta = generatePRDelta(baseContext, files);
+    const pipeline = createPipeline(provider, { verbose: false });
+
+    const pipelineResult = await pipeline.run(
+      files,
+      expected.title,
+      '',
+      baseContext,
+      prDelta
+    );
+
+    const aggregated = aggregateResults(pipelineResult, files);
+    const evalResult = evaluateFindings(
+      aggregated.findings,
+      expected.diffFiles,
+      pipelineResult.agentOutputs
+    );
+
+    console.log(formatEvalReport(evalResult));
+
+    // Check expectations
+    const findingCount = aggregated.findings.length;
+    const inRange = findingCount >= expected.minFindings && findingCount <= expected.maxFindings;
+
+    if (!inRange) {
+      console.log(`  EXPECTATION FAIL: ${findingCount} findings (expected ${expected.minFindings}-${expected.maxFindings})`);
+    } else {
+      console.log(`  EXPECTATION PASS: ${findingCount} findings in range`);
+    }
+
+    results.push({
+      name: expected.name,
+      score: evalResult.score,
+      findings: findingCount,
+      pass: inRange && evalResult.score >= 60,
+    });
+
+    console.log('');
+  }
+
+  // Summary table
+  console.log('=== Summary ===');
+  console.log('Name'.padEnd(30) + 'Score'.padEnd(8) + 'Findings'.padEnd(10) + 'Pass');
+  console.log('-'.repeat(56));
+  for (const r of results) {
+    console.log(
+      r.name.padEnd(30) +
+      String(r.score).padEnd(8) +
+      String(r.findings).padEnd(10) +
+      (r.pass ? 'PASS' : 'FAIL')
+    );
+  }
+
+  const allPass = results.every((r) => r.pass);
+  process.exit(allPass ? 0 : 1);
+}
+
 async function main(): Promise<void> {
   const args = parseArgs(process.argv);
 
   if (args.help) {
     printHelp();
     process.exit(0);
+  }
+
+  if (args.benchmark) {
+    await runBenchmark();
+    return;
   }
 
   // Validate required args
@@ -197,6 +330,18 @@ async function main(): Promise<void> {
 
     // Run review
     const result: ReviewResult = await runReview(provider, context, diff);
+
+    // Run eval if requested
+    if (args.eval) {
+      const { evaluateFindings, formatEvalReport } = await import('./eval/index.js');
+      const diffFiles = diff.files.map((f) => f.filename);
+      const evalResult = evaluateFindings(
+        result.aggregated.findings,
+        diffFiles,
+        result.pipeline.agentOutputs
+      );
+      console.log('\n' + formatEvalReport(evalResult));
+    }
 
     // Output result
     const output: CLIOutput = {
