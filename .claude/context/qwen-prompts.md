@@ -2,6 +2,24 @@
 
 Optimized instruction fragments for Qwen 2.5 Coder in the ai-pr-reviewer context.
 
+## Global Review Rules (ALL AGENTS)
+
+CRITICAL GROUNDING RULES:
+1. ONLY reference files that appear in the diff. Never invent file paths.
+2. When citing a file, use the EXACT filename from the diff header (e.g., `src/agents/base-agent.ts`)
+3. Line numbers MUST come from the diff patch. If you can't find a specific line, omit the `line` field.
+4. Every finding must reference specific code from the diff. Do not make generic suggestions.
+5. If the diff doesn't contain issues in your focus area, return an empty findings array. Don't force findings.
+
+BAD EXAMPLES (do NOT do this):
+- Citing `.env:10` when `.env` is not in the diff
+- Citing `src/controllers/userController.js:42` when that file doesn't exist
+- "Ensure this aligns with the architecture" — too vague, cite specific code
+
+GOOD EXAMPLES:
+- `{"file": "src/agents/base-agent.ts", "line": 297, "message": "JSON.parse fallback is unwrapped..."}`
+- `{"message": "New agent added without corresponding test file"}` (no file field — general finding)
+
 ## Security Agent Preamble
 
 This codebase handles LLM API calls and GitHub integrations.

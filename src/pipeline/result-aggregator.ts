@@ -6,6 +6,7 @@
  */
 
 import type { AgentFinding, AgentOutput } from '../agents/base-agent.js';
+import type { FileChange } from '../lib/github.js';
 import type { PipelineResult } from './pipeline-orchestrator.js';
 import { deduplicateFindings } from '../lib/deduplication.js';
 
@@ -85,11 +86,53 @@ function checkEscalation(
 }
 
 /**
+ * Filter out findings that reference files not present in the PR diff.
+ */
+export function filterUngroundedFindings(
+  findings: AgentFinding[],
+  diffFiles: FileChange[],
+  verbose = false
+): AgentFinding[] {
+  if (diffFiles.length === 0) return findings;
+
+  const diffFilenames = new Set(diffFiles.map((f) => f.filename));
+  const filtered: AgentFinding[] = [];
+  let droppedCount = 0;
+
+  for (const finding of findings) {
+    if (!finding.file || diffFilenames.has(finding.file)) {
+      filtered.push(finding);
+    } else {
+      droppedCount++;
+    }
+  }
+
+  if (verbose && droppedCount > 0) {
+    console.log(`   Dropped ${droppedCount} finding(s) referencing files not in the diff`);
+  }
+
+  return filtered;
+}
+
+/**
  * Aggregate pipeline results into final format.
  */
-export function aggregateResults(result: PipelineResult): AggregatedResult {
+export function aggregateResults(
+  result: PipelineResult,
+  diffFiles?: FileChange[]
+): AggregatedResult {
+  // Filter ungrounded findings if diff files provided
+  let findings = result.findings;
+  if (diffFiles && diffFiles.length > 0) {
+    findings = filterUngroundedFindings(
+      findings,
+      diffFiles,
+      process.env.DEBUG_AI_REVIEW === 'true'
+    );
+  }
+
   // Deduplicate and sort findings
-  const deduplicated = deduplicateFindings(result.findings);
+  const deduplicated = deduplicateFindings(findings);
   const sorted = sortFindings(deduplicated);
 
   // Limit to top findings

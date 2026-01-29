@@ -294,11 +294,19 @@ export function parseCommonResponse(
     // Try to extract JSON from response
     const jsonMatch = response.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
-      parsed = JSON.parse(jsonMatch[0]);
+      try {
+        parsed = JSON.parse(jsonMatch[0]);
+      } catch {
+        return {
+          findings: [],
+          summary: 'Failed to parse agent response (malformed JSON)',
+          confidence: 0,
+        };
+      }
     } else {
       return {
         findings: [],
-        summary: 'Failed to parse response',
+        summary: 'Failed to parse agent response (no JSON found)',
         confidence: 0,
       };
     }
