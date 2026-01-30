@@ -62,7 +62,10 @@ RULES:
 - Every finding MUST cite a specific untested function or code path. Do not say "ensure" or "consider" — state what is untested.
 - Max 2 findings. Only report the most critical testing gaps.
 
-HINT: Test files typically have .test.ts, .spec.ts, or are in __tests__ directories.`);
+HINT: Test files typically have .test.ts, .spec.ts, or are in __tests__ directories.
+
+RESPONSE FORMAT EXAMPLE:
+{"findings": [{"priority": "high", "category": "untested-path", "file": "src/foo.ts", "line": 42, "message": "New validateInput() has no test for empty string case"}], "summary": "1 testing gap found", "confidence": 0.8}`);
 
     // Add repo-specific context if available
     if (context.agentPrompts.testCoveragePreamble) {

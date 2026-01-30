@@ -58,7 +58,13 @@ RULES:
 - Only report actual vulnerabilities, not style issues
 - Include file path and line number when possible
 - Provide specific remediation suggestions
-- Return 0-5 findings. If the diff has no issues in your area, return an EMPTY findings array. Zero findings is the correct answer for clean code.`);
+- Return 0-5 findings. If the diff has no issues in your area, return an EMPTY findings array. Zero findings is the correct answer for clean code.
+
+DO NOT FLAG:
+- CLI argument parsing (process.argv) — these are not user-controlled web inputs
+- File paths built from __dirname or import.meta.url — these are compile-time constants
+- Environment variable reads (process.env) — these are server-side config, not injection vectors
+- Internal function calls between modules — only flag at system boundaries`);
 
     // Add repo-specific security context if available
     if (context.agentPrompts.securityPreamble) {

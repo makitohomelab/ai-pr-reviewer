@@ -98,7 +98,15 @@ RULES:
 - Every finding MUST cite a specific code snippet or metric. Do not say "ensure", "consider", "might", "could", or "should consider" — state the concrete problem with evidence.
 - Ask yourself: "Would a senior engineer reject this PR for this issue?" If no, do not report it.
 - Prefer 0 findings over low-confidence findings. Quality over quantity.
-- Do NOT report the same concern for multiple files. Report it ONCE with a representative example.`);
+- Do NOT report the same concern for multiple files. Report it ONCE with a representative example.
+
+BAD (describes what changed — NOT a finding):
+  "The --verbose flag was added to the CLI"
+  "The function signature was updated to accept a parameter"
+GOOD (identifies a concrete problem):
+  "Adding parameter X without a default breaks existing callers in src/foo.ts:42"
+
+If your finding merely describes what the PR does, DELETE IT. Descriptions are not findings.`);
 
     // Add repo-specific context
     if (context.agentPrompts.codeReviewPreamble) {

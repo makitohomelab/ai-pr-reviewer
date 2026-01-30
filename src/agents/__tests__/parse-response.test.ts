@@ -197,6 +197,39 @@ Hope this helps!`;
     expect(result2.confidence).toBe(0);
   });
 
+  it('should strip <think> tags and parse JSON after them', () => {
+    const response = `<think>Let me analyze this code carefully...</think>{"findings": [{"priority": "high", "category": "security", "message": "XSS vulnerability"}], "summary": "Found XSS", "confidence": 0.9}`;
+
+    const result = parseCommonResponse(response, 'TestAgent');
+
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0].message).toBe('XSS vulnerability');
+    expect(result.summary).toBe('Found XSS');
+  });
+
+  it('should handle nested think tags with multiline content', () => {
+    const response = `<think>
+This is a complex analysis.
+I need to consider multiple factors.
+</think>
+{"findings": [], "summary": "No issues", "confidence": 1.0}`;
+
+    const result = parseCommonResponse(response, 'TestAgent');
+
+    expect(result.findings).toEqual([]);
+    expect(result.summary).toBe('No issues');
+    expect(result.confidence).toBe(1.0);
+  });
+
+  it('should return empty when response is only think tags', () => {
+    const response = '<think>Some reasoning with no actual output</think>';
+
+    const result = parseCommonResponse(response, 'TestAgent');
+
+    expect(result.findings).toEqual([]);
+    expect(result.confidence).toBe(0);
+  });
+
   it('should handle invalid line numbers', () => {
     const response = JSON.stringify({
       findings: [

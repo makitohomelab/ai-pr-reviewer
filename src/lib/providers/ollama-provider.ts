@@ -133,7 +133,27 @@ export class OllamaProvider implements ModelProvider {
     const data = (await response.json()) as OllamaChatResponse;
 
     if (!data.message || !data.message.content) {
-      throw new Error('No response from Ollama');
+      // Retry once — GLM-4.7-flash sometimes returns empty on first attempt
+      console.warn(`[ollama] Empty response from ${model}, retrying once...`);
+      const retryResponse = await fetch(`${this.baseUrl}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      });
+      if (retryResponse.ok) {
+        const retryData = (await retryResponse.json()) as OllamaChatResponse;
+        if (retryData.message?.content) {
+          return {
+            content: retryData.message.content,
+            finishReason: retryData.done_reason === 'stop' ? 'stop' : 'length',
+            usage: {
+              inputTokens: retryData.prompt_eval_count || 0,
+              outputTokens: retryData.eval_count || 0,
+            },
+          };
+        }
+      }
+      throw new Error('No response from Ollama (empty after retry)');
     }
 
     return {

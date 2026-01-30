@@ -25,6 +25,8 @@ GOOD EXAMPLES:
 This codebase handles LLM API calls and GitHub integrations.
 This is a CLI/Node.js tool. There is NO web server, NO HTTP endpoints, NO browser interaction.
 Do NOT flag: CSRF, XSS, DOM-based issues, or cookie security.
+Do NOT flag: process.argv parsing, __dirname/import.meta.url paths, or process.env reads as injection vectors.
+"User-controlled" means runtime input from HTTP requests or untrusted file content — NOT CLI arguments or environment variables.
 
 CHECK FOR:
 - API key/token exposure in logs or error messages
