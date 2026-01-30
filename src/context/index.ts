@@ -10,7 +10,7 @@ export {
   getHighWeightPatterns,
   type BaseContext,
   type Pattern,
-  type QwenPromptFragments,
+  type AgentPromptFragments,
 } from './context-loader.js';
 
 export {

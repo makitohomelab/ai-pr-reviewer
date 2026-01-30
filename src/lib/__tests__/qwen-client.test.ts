@@ -6,7 +6,7 @@ vi.mock('../providers/ollama-provider.js', () => {
   const MockOllamaProvider = vi.fn();
   MockOllamaProvider.prototype.chat = vi.fn();
   MockOllamaProvider.prototype.healthCheck = vi.fn();
-  MockOllamaProvider.prototype.getModelName = vi.fn().mockReturnValue('qwen2.5-coder:32b');
+  MockOllamaProvider.prototype.getModelName = vi.fn().mockReturnValue('qwen3-coder');
   return { OllamaProvider: MockOllamaProvider };
 });
 

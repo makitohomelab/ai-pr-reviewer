@@ -22,12 +22,10 @@ function createMockProvider(response: string): ModelProvider {
 const sampleContext: BaseContext = {
   repoPatterns: '',
   structuredPatterns: [],
-  qwenPrompts: {
+  agentPrompts: {
     securityPreamble: '',
-    breakingPreamble: '',
+    codeReviewPreamble: '',
     testCoveragePreamble: '',
-    performancePreamble: '',
-    codebaseQualityPreamble: '',
   },
   hasCustomContext: false,
 };
@@ -76,9 +74,9 @@ describe('Pipeline Integration Tests', () => {
         sampleDelta
       );
 
-      expect(result.findings.length).toBe(5);
+      expect(result.findings.length).toBe(3);
       expect(result.findings.every((f: AgentFinding) => f.priority === 'medium')).toBe(true);
-      expect(provider.chat).toHaveBeenCalledTimes(5);
+      expect(provider.chat).toHaveBeenCalledTimes(3);
     });
 
     it('should continue pipeline when one agent returns malformed JSON', async () => {
@@ -90,14 +88,6 @@ describe('Pipeline Integration Tests', () => {
         })
         .mockResolvedValueOnce({
           content: 'not valid json at all',
-          usage: { inputTokens: 100, outputTokens: 50 },
-        })
-        .mockResolvedValueOnce({
-          content: validAgentResponse,
-          usage: { inputTokens: 100, outputTokens: 50 },
-        })
-        .mockResolvedValueOnce({
-          content: validAgentResponse,
           usage: { inputTokens: 100, outputTokens: 50 },
         })
         .mockResolvedValueOnce({
@@ -123,8 +113,8 @@ describe('Pipeline Integration Tests', () => {
         sampleDelta
       );
 
-      expect(result.findings.length).toBe(4);
-      expect(mockChat).toHaveBeenCalledTimes(5);
+      expect(result.findings.length).toBe(2);
+      expect(mockChat).toHaveBeenCalledTimes(3);
     });
 
     it('should return empty findings when all agents return garbage', async () => {
@@ -140,7 +130,7 @@ describe('Pipeline Integration Tests', () => {
       );
 
       expect(result.findings).toHaveLength(0);
-      expect(provider.chat).toHaveBeenCalledTimes(5);
+      expect(provider.chat).toHaveBeenCalledTimes(3);
     });
   });
 

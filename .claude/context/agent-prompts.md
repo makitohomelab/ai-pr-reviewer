@@ -1,6 +1,6 @@
-# Qwen Prompt Fragments
+# Agent Prompt Fragments
 
-Optimized instruction fragments for Qwen 2.5 Coder in the ai-pr-reviewer context.
+Optimized instruction fragments for local LLM agents in the ai-pr-reviewer context.
 
 ## Global Review Rules (ALL AGENTS)
 
@@ -23,6 +23,10 @@ GOOD EXAMPLES:
 ## Security Agent Preamble
 
 This codebase handles LLM API calls and GitHub integrations.
+This is a CLI/Node.js tool. There is NO web server, NO HTTP endpoints, NO browser interaction.
+Do NOT flag: CSRF, XSS, DOM-based issues, or cookie security.
+Do NOT flag: process.argv parsing, __dirname/import.meta.url paths, or process.env reads as injection vectors.
+"User-controlled" means runtime input from HTTP requests or untrusted file content — NOT CLI arguments or environment variables.
 
 CHECK FOR:
 - API key/token exposure in logs or error messages
@@ -37,10 +41,11 @@ FLAG if you see:
 - `fetch()` with user-controlled URLs
 - Hardcoded tokens or API keys
 
-## Breaking Changes Agent Preamble
+## Code Review Agent Preamble
 
 This codebase uses provider abstraction and capability-based routing.
 
+### Breaking Changes
 CHECK FOR:
 - Changes to `ModelProvider` interface signatures
 - Changes to `ModelCapability` enum values
@@ -54,24 +59,7 @@ FLAG if you see:
 - New required parameters without defaults
 - Type changes that narrow accepted values
 
-## Test Coverage Agent Preamble
-
-Test files use Vitest and are co-located with source (`.test.ts` suffix).
-
-CHECK FOR:
-- New agents without corresponding test files
-- Changes to pipeline logic without integration tests
-- Provider changes without mock-based unit tests
-- Error handling paths without test coverage
-
-FLAG if you see:
-- New `src/agents/*.ts` without matching `*.test.ts`
-- Changes to `pipeline-orchestrator.ts` without tests
-- New error conditions without corresponding test cases
-- Mocks that hide actual integration issues
-
-## Performance Agent Preamble
-
+### Performance
 This codebase runs sequential LLM calls which are inherently slow.
 
 CHECK FOR:
@@ -86,8 +74,7 @@ FLAG if you see:
 - Token estimation skipped before large prompt construction
 - Synchronous file reads (`readFileSync`) in async functions
 
-## Codebase Quality Agent Preamble
-
+### Code Quality
 You analyze whole-codebase health, not just PR diffs. You receive pre-computed metrics.
 
 CHECK FOR:
@@ -110,3 +97,19 @@ FLAG if you see:
 - Adding complexity to already-complex functions (CC > 10)
 - Duplicating utility functions that exist in `src/lib/`
 - Exports from new files that aren't re-exported from index.ts
+
+## Test Coverage Agent Preamble
+
+Test files use Vitest and are co-located with source (`.test.ts` suffix).
+
+CHECK FOR:
+- New agents without corresponding test files
+- Changes to pipeline logic without integration tests
+- Provider changes without mock-based unit tests
+- Error handling paths without test coverage
+
+FLAG if you see:
+- New `src/agents/*.ts` without matching `*.test.ts`
+- Changes to `pipeline-orchestrator.ts` without tests
+- New error conditions without corresponding test cases
+- Mocks that hide actual integration issues

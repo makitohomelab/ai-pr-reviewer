@@ -7,11 +7,11 @@ An automated PR review system using specialized AI agents. This repo IS the AI P
 ## Cross-Model Collaboration
 
 ```
-Sonnet/Opus (you) → writes code → PR opened → Qwen agents review → Sonnet responds → learnings sync
+Sonnet/Opus (you) → writes code → PR opened → local LLM agents review → Sonnet responds → learnings sync
 ```
 
 - **Sonnet/Opus** (you): Write code, respond to reviews
-- **Qwen agents**: Review PRs via GitHub Actions pipeline
+- **Local LLM agents** (qwen3-coder, glm-4.7-flash): Review PRs via GitHub Actions pipeline
 - **Feedback loop**: Learnings sync to repo-manager MCP
 
 ## Key Skills
@@ -25,22 +25,21 @@ Sonnet/Opus (you) → writes code → PR opened → Qwen agents review → Sonne
 ### Agent System
 
 Agents extend `BaseAgent` in `src/agents/`. Each agent:
-1. Has a focused capability (security, performance, breaking-changes, test-coverage)
+1. Has a focused capability (security, code-review, test-coverage)
 2. Defines its own system prompt and response schema
 3. Runs in the pipeline with accumulated findings
 
 Current agents:
-- `SecurityAgent` - Vulnerability detection
-- `BreakingChangesAgent` - API compatibility
-- `TestCoverageAgent` - Test gap analysis
-- `PerformanceAgent` - Performance impact review
+- `SecurityAgent` - Vulnerability detection (priority 1)
+- `CodeReviewAgent` - Breaking changes, performance, code quality (priority 2)
+- `TestCoverageAgent` - Test gap analysis (priority 3)
 
 ### Context System (Light-RAG)
 
 Context files in `.claude/context/` are loaded at review time:
 - `base.md` - Human-readable patterns and decisions
 - `patterns.json` - Structured matching rules for file types
-- `qwen-prompts.md` - Agent preambles and guidelines
+- `agent-prompts.md` - Agent preambles and guidelines
 
 Regenerate after major architecture changes with `/generate-qwen-context`.
 
@@ -56,7 +55,7 @@ All LLM calls go through `ModelProvider.chat(params, capability)`:
 1. Create `src/agents/<name>-agent.ts` extending `BaseAgent`
 2. Export from `src/agents/index.ts`
 3. Add to pipeline in `src/pipeline/pipeline-orchestrator.ts`
-4. Add preamble section to `.claude/context/qwen-prompts.md`
+4. Add preamble section to `.claude/context/agent-prompts.md`
 
 Or use `/add-review-agent <name>` to scaffold automatically.
 
@@ -85,5 +84,5 @@ src/
 ├── context/          # Review context files
 │   ├── base.md       # Human-readable patterns
 │   ├── patterns.json # Structured matching rules
-│   └── qwen-prompts.md # Agent preambles
+│   └── agent-prompts.md # Agent preambles
 └── commands/         # Skills for this repo

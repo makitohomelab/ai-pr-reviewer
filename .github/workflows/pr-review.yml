@@ -4,23 +4,8 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
 
-# Configuration - edit these values for your setup
 env:
-  # Ollama inference server - uses native API for structured output
-  # Set this to your Ollama server URL (e.g., http://localhost:11434 or your GPU server)
   OLLAMA_BASE_URL: ${{ vars.OLLAMA_BASE_URL || 'http://localhost:11434' }}
-
-  # Default model (backward compat - used if capability-specific models not set)
-  OLLAMA_MODEL: qwen2.5-coder:32b
-
-  # Capability-specific models (optional - override for specialized tasks)
-  # Available models:
-  #   qwen2.5-coder:7b   - Fast, good quality (4.4GB)
-  #   qwen2.5-coder:14b  - Best balance of speed/quality (8.4GB)
-  #   qwen2.5-coder:32b  - Highest quality, slower (18.4GB)
-  OLLAMA_CODE_REVIEW_MODEL: qwen2.5-coder:32b
-  OLLAMA_SECURITY_MODEL: qwen2.5-coder:32b
-  # OLLAMA_REASONING_MODEL: qwen2.5-coder:32b  # For complex reasoning tasks
 
   # Pipeline configuration
   AGENT_TOKEN_BUDGET: "16384"        # Token budget per agent
@@ -109,9 +94,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MODEL_PROVIDER: ollama
           OLLAMA_BASE_URL: ${{ env.OLLAMA_BASE_URL }}
-          OLLAMA_MODEL: ${{ env.OLLAMA_MODEL }}
-          OLLAMA_CODE_REVIEW_MODEL: ${{ env.OLLAMA_CODE_REVIEW_MODEL }}
-          OLLAMA_SECURITY_MODEL: ${{ env.OLLAMA_SECURITY_MODEL }}
           AGENT_TOKEN_BUDGET: ${{ env.AGENT_TOKEN_BUDGET }}
           PIPELINE_MODE: ${{ env.PIPELINE_MODE }}
           REPO_MANAGER_SYNC: ${{ env.REPO_MANAGER_SYNC }}

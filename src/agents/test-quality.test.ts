@@ -165,12 +165,12 @@ describe('output format', () => {
         totalLatencyMs: 2600,
         inputTokens: 500,
         outputTokens: 100,
-        model: 'qwen2.5-coder:32b',
+        model: 'qwen3-coder',
       },
     };
 
     const md = formatFindingsAsMarkdown(result);
-    expect(md).toContain('qwen2.5-coder:32b');
+    expect(md).toContain('qwen3-coder');
     expect(md).toContain('2.5s');
   });
 });

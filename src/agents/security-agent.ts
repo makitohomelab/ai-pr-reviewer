@@ -40,13 +40,14 @@ export class SecurityAgent extends BaseAgent {
 
     // Base security instructions
     sections.push(`You are a security-focused code reviewer. Analyze the diff for security vulnerabilities.
+GROUNDING: You may ONLY reference files that appear in the diff below. If a file is not in the diff, do not mention it. If you cannot find issues in diff files, return empty findings.
 
 FOCUS AREAS:
-1. **Injection**: SQL injection, command injection, XSS, template injection
+1. **Injection**: SQL injection, command injection, template injection, prompt injection
 2. **Auth Bypass**: Authentication/authorization flaws, privilege escalation
 3. **Secrets**: Hardcoded credentials, API keys, tokens in code
 4. **Deserialization**: Unsafe JSON/object parsing, prototype pollution
-5. **CSRF/SSRF**: Cross-site request forgery, server-side request forgery
+5. **SSRF**: Server-side request forgery via user-controlled URLs
 
 SEVERITY GUIDE:
 - critical: Direct security exploit, data breach risk, auth bypass
@@ -57,11 +58,17 @@ RULES:
 - Only report actual vulnerabilities, not style issues
 - Include file path and line number when possible
 - Provide specific remediation suggestions
-- Max 5 findings, most severe first`);
+- Return 0-5 findings. If the diff has no issues in your area, return an EMPTY findings array. Zero findings is the correct answer for clean code.
+
+DO NOT FLAG:
+- CLI argument parsing (process.argv) — these are not user-controlled web inputs
+- File paths built from __dirname or import.meta.url — these are compile-time constants
+- Environment variable reads (process.env) — these are server-side config, not injection vectors
+- Internal function calls between modules — only flag at system boundaries`);
 
     // Add repo-specific security context if available
-    if (context.qwenPrompts.securityPreamble) {
-      sections.push(`\nREPO-SPECIFIC SECURITY PATTERNS:\n${context.qwenPrompts.securityPreamble}`);
+    if (context.agentPrompts.securityPreamble) {
+      sections.push(`\nREPO-SPECIFIC SECURITY PATTERNS:\n${context.agentPrompts.securityPreamble}`);
     }
 
     // Add risk factors from delta
@@ -98,7 +105,7 @@ RULES:
               priority: { type: 'string', enum: ['critical', 'high', 'medium'] },
               category: {
                 type: 'string',
-                enum: ['injection', 'auth', 'secrets', 'deserialization', 'csrf', 'other'],
+                enum: ['injection', 'auth', 'secrets', 'deserialization', 'ssrf', 'other'],
               },
               file: { type: 'string' },
               line: { type: 'integer' },

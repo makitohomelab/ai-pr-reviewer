@@ -28,6 +28,7 @@ interface CLIArgs {
   title?: string;
   eval?: boolean;
   benchmark?: boolean;
+  verbose?: boolean;
 }
 
 interface CLIOutput {
@@ -77,6 +78,8 @@ export function parseArgs(argv: string[]): CLIArgs {
       args.eval = true;
     } else if (arg === '--benchmark') {
       args.benchmark = true;
+    } else if (arg === '--verbose' || arg === '-v') {
+      args.verbose = true;
     }
   }
 
@@ -100,6 +103,7 @@ Options:
   -t, --title <title>      PR title (used with --diff)
   -e, --eval               Run quality evaluation on results
   --benchmark              Run all benchmark fixtures
+  -v, --verbose            Show detailed findings (with --benchmark)
   -h, --help               Show this help message
 
 Environment:
@@ -126,7 +130,7 @@ function outputError(error: string, hint?: string): void {
   });
 }
 
-async function runBenchmark(): Promise<void> {
+async function runBenchmark(verbose = false): Promise<void> {
   const { readFileSync, readdirSync } = await import('fs');
   const { join, dirname } = await import('path');
   const { fileURLToPath } = await import('url');
@@ -142,15 +146,15 @@ async function runBenchmark(): Promise<void> {
 
   // Find fixtures
   const __dirname = dirname(fileURLToPath(import.meta.url));
-  const fixturesDir = join(__dirname, 'eval', 'fixtures');
+  let fixturesDir = join(__dirname, 'eval', 'fixtures');
 
   let expectedFiles: string[];
   try {
     expectedFiles = readdirSync(fixturesDir).filter((f: string) => f.endsWith('-expected.json'));
   } catch {
-    // Try from dist/
-    const distFixtures = join(__dirname, '..', 'src', 'eval', 'fixtures');
-    expectedFiles = readdirSync(distFixtures).filter((f: string) => f.endsWith('-expected.json'));
+    // Running from dist/ — fixtures are in src/
+    fixturesDir = join(__dirname, '..', 'src', 'eval', 'fixtures');
+    expectedFiles = readdirSync(fixturesDir).filter((f: string) => f.endsWith('-expected.json'));
   }
 
   console.log(`\n=== Benchmark Suite ===`);
@@ -167,7 +171,7 @@ async function runBenchmark(): Promise<void> {
     } = JSON.parse(readFileSync(expectedPath, 'utf-8'));
 
     // Find corresponding diff file
-    const diffFile = expectedFile.replace('-expected.json', '.diff');
+    const diffFile = `${expected.name}.diff`;
     const diffPath = join(fixturesDir, diffFile);
 
     let diffContent: string;
@@ -202,6 +206,17 @@ async function runBenchmark(): Promise<void> {
     );
 
     console.log(formatEvalReport(evalResult));
+
+    if (verbose) {
+      for (const f of aggregated.findings) {
+        console.log(`  [${f.agent}] ${f.category} @ ${f.file || 'general'}${f.line ? ':' + f.line : ''}`);
+        console.log(`    ${f.message}`);
+        if (f.suggestion) console.log(`    Suggestion: ${f.suggestion}`);
+      }
+      if (aggregated.findings.length === 0) {
+        console.log(`  (no findings)`);
+      }
+    }
 
     // Check expectations
     const findingCount = aggregated.findings.length;
@@ -249,7 +264,7 @@ async function main(): Promise<void> {
   }
 
   if (args.benchmark) {
-    await runBenchmark();
+    await runBenchmark(args.verbose);
     return;
   }
 

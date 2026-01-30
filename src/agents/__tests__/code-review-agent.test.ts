@@ -1,12 +1,12 @@
 /**
- * Codebase Quality Agent Tests
+ * Code Review Agent Tests
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
-  CodebaseQualityAgent,
-  createCodebaseQualityAgent,
-} from '../codebase-quality-agent.js';
+  CodeReviewAgent,
+  createCodeReviewAgent,
+} from '../code-review-agent.js';
 import type { ModelProvider } from '../../lib/model-provider.js';
 import type { StaticAnalysis } from '../../analysis/static-analyzer.js';
 import type { InfraAnalysis } from '../../analysis/infra-analyzer.js';
@@ -30,12 +30,10 @@ function createMockProvider(response: string): ModelProvider {
 const sampleContext: BaseContext = {
   repoPatterns: '',
   structuredPatterns: [],
-  qwenPrompts: {
+  agentPrompts: {
     securityPreamble: '',
-    breakingPreamble: '',
+    codeReviewPreamble: 'Check for breaking changes, performance, and quality.',
     testCoveragePreamble: '',
-    performancePreamble: '',
-    codebaseQualityPreamble: 'Check for complexity and duplication.',
   },
   hasCustomContext: true,
 };
@@ -85,8 +83,8 @@ const sampleInfraAnalysis: InfraAnalysis = {
   skipped: false,
 };
 
-describe('CodebaseQualityAgent', () => {
-  let agent: CodebaseQualityAgent;
+describe('CodeReviewAgent', () => {
+  let agent: CodeReviewAgent;
   let mockProvider: ModelProvider;
 
   beforeEach(() => {
@@ -106,12 +104,12 @@ describe('CodebaseQualityAgent', () => {
         confidence: 0.85,
       })
     );
-    agent = createCodebaseQualityAgent(mockProvider);
+    agent = createCodeReviewAgent(mockProvider);
   });
 
   it('should create agent with correct config', () => {
-    expect(agent.name).toBe('codebase-quality');
-    expect(agent.priority).toBe(5); // Runs last
+    expect(agent.name).toBe('code-review');
+    expect(agent.priority).toBe(2); // Runs after security
   });
 
   it('should run analysis and return findings', async () => {
@@ -132,7 +130,7 @@ describe('CodebaseQualityAgent', () => {
       previousFindings: [],
     });
 
-    expect(result.agent).toBe('codebase-quality');
+    expect(result.agent).toBe('code-review');
     expect(result.findings).toHaveLength(1);
     expect(result.findings[0].category).toBe('complexity');
     expect(result.findings[0].priority).toBe('high');
@@ -159,12 +157,10 @@ describe('CodebaseQualityAgent', () => {
       previousFindings: [],
     });
 
-    // Verify provider was called with system prompt containing analysis
     expect(mockProvider.chat).toHaveBeenCalled();
     const call = (mockProvider.chat as ReturnType<typeof vi.fn>).mock.calls[0];
     const systemPrompt = call[0].system as string;
 
-    // Should include static analysis summary
     expect(systemPrompt).toContain('CODEBASE METRICS');
     expect(systemPrompt).toContain('5 files');
     expect(systemPrompt).toContain('processData');
@@ -193,7 +189,6 @@ describe('CodebaseQualityAgent', () => {
     const call = (mockProvider.chat as ReturnType<typeof vi.fn>).mock.calls[0];
     const systemPrompt = call[0].system as string;
 
-    // Should include infra analysis summary
     expect(systemPrompt).toContain('INFRASTRUCTURE STATUS');
     expect(systemPrompt).toContain('CONTAINERS');
   });
@@ -242,11 +237,10 @@ describe('CodebaseQualityAgent', () => {
     const call = (mockProvider.chat as ReturnType<typeof vi.fn>).mock.calls[0];
     const systemPrompt = call[0].system as string;
 
-    // Should NOT include infra analysis when skipped
     expect(systemPrompt).not.toContain('INFRASTRUCTURE STATUS');
   });
 
-  it('should include repo-specific quality preamble', async () => {
+  it('should include repo-specific code review preamble', async () => {
     await agent.run({
       files: [
         {
@@ -267,13 +261,12 @@ describe('CodebaseQualityAgent', () => {
     const call = (mockProvider.chat as ReturnType<typeof vi.fn>).mock.calls[0];
     const systemPrompt = call[0].system as string;
 
-    // Should include the preamble from context
-    expect(systemPrompt).toContain('Check for complexity and duplication.');
+    expect(systemPrompt).toContain('Check for breaking changes, performance, and quality.');
   });
 
   it('should handle parsing errors gracefully', async () => {
     const badProvider = createMockProvider('not valid json');
-    const badAgent = createCodebaseQualityAgent(badProvider);
+    const badAgent = createCodeReviewAgent(badProvider);
 
     const result = await badAgent.run({
       files: [
@@ -292,7 +285,6 @@ describe('CodebaseQualityAgent', () => {
       previousFindings: [],
     });
 
-    // Should return empty findings, not throw
     expect(result.findings).toHaveLength(0);
     expect(result.confidence).toBe(0);
   });
@@ -301,17 +293,17 @@ describe('CodebaseQualityAgent', () => {
     const allCategoriesProvider = createMockProvider(
       JSON.stringify({
         findings: [
-          { priority: 'high', category: 'complexity', message: 'Test' },
-          { priority: 'medium', category: 'duplication', message: 'Test' },
-          { priority: 'medium', category: 'dead-code', message: 'Test' },
+          { priority: 'high', category: 'api', message: 'Test' },
+          { priority: 'medium', category: 'n+1', message: 'Test' },
+          { priority: 'medium', category: 'complexity', message: 'Test' },
           { priority: 'high', category: 'pattern-drift', message: 'Test' },
-          { priority: 'critical', category: 'infra-drift', message: 'Test' },
+          { priority: 'critical', category: 'resource-leak', message: 'Test' },
         ],
         summary: 'Multiple issues found.',
         confidence: 0.9,
       })
     );
-    const allCategoriesAgent = createCodebaseQualityAgent(allCategoriesProvider);
+    const allCategoriesAgent = createCodeReviewAgent(allCategoriesProvider);
 
     const result = await allCategoriesAgent.run({
       files: [
@@ -332,20 +324,20 @@ describe('CodebaseQualityAgent', () => {
 
     expect(result.findings).toHaveLength(5);
     const categories = result.findings.map((f) => f.category);
+    expect(categories).toContain('api');
+    expect(categories).toContain('n+1');
     expect(categories).toContain('complexity');
-    expect(categories).toContain('duplication');
-    expect(categories).toContain('dead-code');
     expect(categories).toContain('pattern-drift');
-    expect(categories).toContain('infra-drift');
+    expect(categories).toContain('resource-leak');
   });
 });
 
-describe('createCodebaseQualityAgent', () => {
+describe('createCodeReviewAgent', () => {
   it('should create a valid agent instance', () => {
     const provider = createMockProvider('{}');
-    const agent = createCodebaseQualityAgent(provider);
+    const agent = createCodeReviewAgent(provider);
 
-    expect(agent).toBeInstanceOf(CodebaseQualityAgent);
-    expect(agent.name).toBe('codebase-quality');
+    expect(agent).toBeInstanceOf(CodeReviewAgent);
+    expect(agent.name).toBe('code-review');
   });
 });

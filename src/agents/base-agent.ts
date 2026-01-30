@@ -288,11 +288,14 @@ export function parseCommonResponse(
     confidence?: number;
   };
 
+  // Strip <think>...</think> blocks (common with GLM and Qwen reasoning models)
+  const cleaned = response.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+
   try {
-    parsed = JSON.parse(response);
+    parsed = JSON.parse(cleaned);
   } catch {
     // Try to extract JSON from response
-    const jsonMatch = response.match(/\{[\s\S]*\}/);
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       try {
         parsed = JSON.parse(jsonMatch[0]);

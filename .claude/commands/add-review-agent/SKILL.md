@@ -15,7 +15,7 @@ Example: `/add-review-agent documentation` creates a DocumentationAgent.
 1. `src/agents/<name>-agent.ts` - Agent implementation extending BaseAgent
 2. Updates `src/agents/index.ts` - Export the new agent
 3. Updates `src/pipeline/pipeline-orchestrator.ts` - Add to default agents
-4. Updates `.claude/context/qwen-prompts.md` - Add preamble section
+4. Updates `.claude/context/agent-prompts.md` - Add preamble section
 
 ## Agent Template Structure
 
@@ -47,12 +47,12 @@ export class <Name>Agent extends BaseAgent {
    - Priority relative to other agents
 3. **Update exports**: Add to `src/agents/index.ts`
 4. **Add to pipeline**: Update `pipeline-orchestrator.ts` default agents
-5. **Add preamble**: Create section in `qwen-prompts.md` for repo-specific guidance
+5. **Add preamble**: Create section in `agent-prompts.md` for repo-specific guidance
 
 ## After Creation
 
 1. Customize the system prompt for your specific review focus
-2. Add repo-specific patterns to the qwen-prompts.md preamble
+2. Add repo-specific patterns to the agent-prompts.md preamble
 3. Test locally: `pnpm build && node dist/index.js --pr <test-pr>`
 4. Commit and push to trigger the full pipeline
 

@@ -7,10 +7,6 @@ on:
         description: 'Ollama server URL'
         type: string
         default: 'http://localhost:11434'
-      ollama_model:
-        description: 'Ollama model for code review'
-        type: string
-        default: 'qwen2.5-coder:32b'
       pipeline_mode:
         description: 'Pipeline mode: sequential or parallel'
         type: string
@@ -85,9 +81,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MODEL_PROVIDER: ollama
           OLLAMA_BASE_URL: ${{ inputs.ollama_base_url }}
-          OLLAMA_MODEL: ${{ inputs.ollama_model }}
-          OLLAMA_CODE_REVIEW_MODEL: ${{ inputs.ollama_model }}
-          OLLAMA_SECURITY_MODEL: ${{ inputs.ollama_model }}
           AGENT_TOKEN_BUDGET: ${{ inputs.agent_token_budget }}
           PIPELINE_MODE: ${{ inputs.pipeline_mode }}
           REPO_MANAGER_SYNC: "false"
