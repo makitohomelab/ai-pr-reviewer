@@ -39,6 +39,7 @@ export class TestCoverageAgent extends BaseAgent {
 
     // Base test coverage instructions
     sections.push(`You are a code reviewer focused on test coverage. Analyze the diff for testing gaps.
+GROUNDING: You may ONLY reference files that appear in the diff below. If a file is not in the diff, do not mention it. If you cannot find issues in diff files, return empty findings.
 
 FOCUS AREAS:
 1. **Untested Paths**: New code without corresponding tests
@@ -56,14 +57,16 @@ RULES:
 - If new code is added, check for corresponding test files
 - Look for error handling paths that aren't tested
 - Check if tests actually assert meaningful behavior
-- Consider if mocks are hiding real bugs
-- Max 5 findings, most severe first
+- Return 0-5 findings. If the diff has no issues in your area, return an EMPTY findings array. Zero findings is the correct answer for clean code.
+- If the diff INCLUDES test files, the author is already testing. Only flag clear gaps, not theoretical ones.
+- Every finding MUST cite a specific untested function or code path. Do not say "ensure" or "consider" — state what is untested.
+- Max 2 findings. Only report the most critical testing gaps.
 
 HINT: Test files typically have .test.ts, .spec.ts, or are in __tests__ directories.`);
 
     // Add repo-specific context if available
-    if (context.qwenPrompts.testCoveragePreamble) {
-      sections.push(`\nREPO-SPECIFIC TESTING PATTERNS:\n${context.qwenPrompts.testCoveragePreamble}`);
+    if (context.agentPrompts.testCoveragePreamble) {
+      sections.push(`\nREPO-SPECIFIC TESTING PATTERNS:\n${context.agentPrompts.testCoveragePreamble}`);
     }
 
     // Add file categories to help identify test files
