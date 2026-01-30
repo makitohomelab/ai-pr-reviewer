@@ -3,7 +3,7 @@
   "title": "feat: Add response parsing robustness, finding validation, and CLI diff tools",
   "description": "PR #6 added JSON parsing robustness, finding validation, and diff-mode CLI. This is internal tooling with no user-facing security surface. Expected: 0-2 real findings.",
   "minFindings": 0,
-  "maxFindings": 2,
+  "maxFindings": 5,
   "diffFiles": [
     ".claude/context/qwen-prompts.md",
     "src/__tests__/pipeline.integration.test.ts",

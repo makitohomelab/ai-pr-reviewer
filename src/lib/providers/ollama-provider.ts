@@ -63,7 +63,7 @@ export class OllamaProvider implements ModelProvider {
     this.baseUrl = baseUrl;
 
     // Support single model (backward compat) or separate models per capability
-    const defaultModel = config?.model || process.env.OLLAMA_MODEL || 'qwen2.5-coder:32b';
+    const defaultModel = config?.model || process.env.OLLAMA_MODEL || 'qwen3-coder';
     const fastModel = config?.fastModel || process.env.OLLAMA_FAST_MODEL || defaultModel;
     const smartModel = config?.smartModel || process.env.OLLAMA_SMART_MODEL || defaultModel;
 

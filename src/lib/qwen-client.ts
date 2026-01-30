@@ -23,7 +23,7 @@ export class QwenClient {
   constructor(config?: QwenClientConfig) {
     this.provider = new OllamaProvider({
       baseUrl: config?.baseUrl ?? 'http://100.108.144.37:11434',
-      model: config?.model ?? 'qwen2.5-coder:32b',
+      model: config?.model ?? 'qwen3-coder',
     });
   }
 
