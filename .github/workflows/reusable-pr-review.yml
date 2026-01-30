@@ -3,6 +3,10 @@ name: Reusable AI PR Review
 on:
   workflow_call:
     inputs:
+      ollama_base_url:
+        description: 'Ollama server URL'
+        type: string
+        default: 'http://localhost:11434'
       ollama_model:
         description: 'Ollama model for code review'
         type: string
@@ -57,7 +61,7 @@ jobs:
 
       - name: Verify Ollama Available
         env:
-          OLLAMA_BASE_URL: ${{ vars.OLLAMA_BASE_URL || 'http://localhost:11434' }}
+          OLLAMA_BASE_URL: ${{ inputs.ollama_base_url }}
         run: |
           for i in {1..10}; do
             if curl -s --connect-timeout 5 "$OLLAMA_BASE_URL/api/tags"; then
@@ -80,7 +84,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MODEL_PROVIDER: ollama
-          OLLAMA_BASE_URL: ${{ vars.OLLAMA_BASE_URL || 'http://localhost:11434' }}
+          OLLAMA_BASE_URL: ${{ inputs.ollama_base_url }}
           OLLAMA_MODEL: ${{ inputs.ollama_model }}
           OLLAMA_CODE_REVIEW_MODEL: ${{ inputs.ollama_model }}
           OLLAMA_SECURITY_MODEL: ${{ inputs.ollama_model }}
