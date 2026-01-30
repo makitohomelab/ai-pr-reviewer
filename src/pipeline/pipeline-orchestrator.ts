@@ -19,11 +19,9 @@ import type {
 } from '../agents/base-agent.js';
 import {
   createSecurityAgent,
-  createBreakingAgent,
+  createCodeReviewAgent,
   createTestCoverageAgent,
-  createPerformanceAgent,
-  createCodebaseQualityAgent,
-  CodebaseQualityAgent,
+  CodeReviewAgent,
 } from '../agents/index.js';
 import {
   analyzeCodebase,
@@ -102,10 +100,8 @@ export interface PipelineResult {
 function createDefaultAgents(provider: ModelProvider): BaseAgent[] {
   return [
     createSecurityAgent(provider),
-    createBreakingAgent(provider),
+    createCodeReviewAgent(provider),
     createTestCoverageAgent(provider),
-    createPerformanceAgent(provider),
-    createCodebaseQualityAgent(provider),
   ];
 }
 
@@ -196,15 +192,14 @@ export class PipelineOrchestrator {
   }
 
   /**
-   * Prepare CodebaseQualityAgent with analysis data.
+   * Prepare CodeReviewAgent with analysis data.
    */
-  private prepareCodebaseQualityAgent(
+  private prepareCodeReviewAgent(
     staticAnalysis?: StaticAnalysis,
     infraAnalysis?: InfraAnalysis
   ): void {
-    // Find the CodebaseQualityAgent and set its analysis data
     for (const agent of this.agents) {
-      if (agent instanceof CodebaseQualityAgent) {
+      if (agent instanceof CodeReviewAgent) {
         agent.setAnalysisData(staticAnalysis, infraAnalysis);
       }
     }
@@ -223,8 +218,8 @@ export class PipelineOrchestrator {
     // Run pre-analysis phase
     const preAnalysis = await this.runPreAnalysis(files);
 
-    // Prepare CodebaseQualityAgent with analysis data
-    this.prepareCodebaseQualityAgent(preAnalysis.static, preAnalysis.infra);
+    // Prepare CodeReviewAgent with analysis data
+    this.prepareCodeReviewAgent(preAnalysis.static, preAnalysis.infra);
 
     // Run agents
     let result: PipelineResult;
