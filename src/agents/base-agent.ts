@@ -67,6 +67,8 @@ export interface AgentInput {
   prDelta: PRDelta;
   /** Findings from previous agents in the pipeline */
   previousFindings: AgentFinding[];
+  /** Full source of imported files for architectural context */
+  sourceFiles?: Map<string, string>;
 }
 
 /**
@@ -159,6 +161,15 @@ export abstract class BaseAgent {
       sections.push(`## Previous Findings\n${findingSummary}`);
     }
 
+    // Source context (imported files)
+    if (input.sourceFiles && input.sourceFiles.size > 0) {
+      sections.push('## Source Context\n\nFull source of imported modules for reference:');
+      for (const [filepath, content] of input.sourceFiles) {
+        const ext = filepath.split('.').pop() || 'ts';
+        sections.push(`### ${filepath}\n\n\`\`\`${ext}\n${content}\n\`\`\``);
+      }
+    }
+
     // File changes
     sections.push('## Changed Files');
 
@@ -174,8 +185,8 @@ export abstract class BaseAgent {
 
       let patch = file.patch || '(binary or too large)';
       // Truncate large patches
-      if (estimateTokens(patch) > 2000) {
-        patch = truncatePatch(patch, 2000);
+      if (estimateTokens(patch) > 4000) {
+        patch = truncatePatch(patch, 4000);
       }
 
       sections.push(`${header}\n${stats}\n\n\`\`\`diff\n${patch}\n\`\`\``);

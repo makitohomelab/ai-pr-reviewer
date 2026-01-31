@@ -20,8 +20,9 @@ import {
   type PRContext,
   type PRDiff,
 } from './lib/github.js';
+import type { Octokit } from '@octokit/rest';
 import { createProvider, type ModelProvider } from './lib/providers/index.js';
-import { loadBaseContext, generatePRDelta } from './context/index.js';
+import { loadBaseContext, generatePRDelta, buildSmartContext } from './context/index.js';
 import {
   createPipeline,
   aggregateResults,
@@ -42,7 +43,8 @@ export interface ReviewResult {
 export async function runReview(
   provider: ModelProvider,
   context: PRContext,
-  diff: PRDiff
+  diff: PRDiff,
+  octokit?: Octokit
 ): Promise<ReviewResult> {
   console.log(`📋 Reviewing PR #${context.prNumber}: ${context.title}`);
   console.log(`   Files changed: ${diff.files.length}`);
@@ -94,6 +96,21 @@ export async function runReview(
   console.log(`   Risk factors: ${prDelta.riskFactors.length}`);
   console.log(`   Matched patterns: ${prDelta.changedPatterns.length}`);
 
+  // Build smart context (fetch imported source files)
+  let sourceFiles: Map<string, string> | undefined;
+  const smartContextEnabled = process.env.SMART_CONTEXT !== 'false' && octokit;
+
+  if (smartContextEnabled) {
+    console.log('\n🧠 Building smart context (fetching imports)...');
+    const smartContext = await buildSmartContext(octokit, context, reviewableFiles);
+    if (smartContext.sourceFiles.size > 0) {
+      sourceFiles = smartContext.sourceFiles;
+      console.log(`   Fetched ${sourceFiles.size} source files (~${smartContext.tokenCount} tokens)`);
+    } else {
+      console.log('   No local imports found to fetch');
+    }
+  }
+
   // Create and run pipeline
   const executionMode = (process.env.PIPELINE_MODE || 'sequential') as ExecutionMode;
   const pipeline = createPipeline(provider, {
@@ -106,7 +123,8 @@ export async function runReview(
     context.title,
     context.body,
     baseContext,
-    prDelta
+    prDelta,
+    sourceFiles
   );
 
   // Aggregate results (pass diff files to filter hallucinated file references)
@@ -160,7 +178,7 @@ async function main(): Promise<void> {
   }
 
   // Run the review
-  const result = await runReview(provider, context, diff);
+  const result = await runReview(provider, context, diff, github);
 
   // Format and post comment
   const comment = formatAsMarkdown(result.aggregated);

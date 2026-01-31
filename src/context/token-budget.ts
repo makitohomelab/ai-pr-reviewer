@@ -17,6 +17,8 @@ export interface TokenBudget {
   context: number;
   /** Budget for previous findings from other agents */
   previousFindings: number;
+  /** Budget for source context (imported files) */
+  sourceContext: number;
   /** Budget for PR diff content */
   prDiff: number;
   /** Reserved for response generation */
@@ -27,12 +29,13 @@ export interface TokenBudget {
  * Default token budget (16K total, typical for Qwen 2.5 Coder context).
  */
 export const DEFAULT_TOKEN_BUDGET: TokenBudget = {
-  total: 16384,
+  total: 32768,
   systemPrompt: 2000,
   context: 2000,
   previousFindings: 1000,
-  prDiff: 8000,
-  response: 2000,
+  sourceContext: 8000,
+  prDiff: 12000,
+  response: 4000,
 };
 
 /**
@@ -48,6 +51,7 @@ export function createTokenBudget(
     budget.systemPrompt +
     budget.context +
     budget.previousFindings +
+    budget.sourceContext +
     budget.prDiff +
     budget.response;
 
@@ -175,6 +179,7 @@ export function formatBudgetUsage(
     systemPrompt: number;
     context: number;
     previousFindings: number;
+    sourceContext: number;
     prDiff: number;
   }
 ): string {
@@ -183,9 +188,10 @@ export function formatBudgetUsage(
     `  System Prompt: ${actual.systemPrompt}/${budget.systemPrompt}`,
     `  Context: ${actual.context}/${budget.context}`,
     `  Prev Findings: ${actual.previousFindings}/${budget.previousFindings}`,
+    `  Source Context: ${actual.sourceContext}/${budget.sourceContext}`,
     `  PR Diff: ${actual.prDiff}/${budget.prDiff}`,
     `  Reserved: ${budget.response}`,
-    `  Total: ${actual.systemPrompt + actual.context + actual.previousFindings + actual.prDiff + budget.response}/${budget.total}`,
+    `  Total: ${actual.systemPrompt + actual.context + actual.previousFindings + actual.sourceContext + actual.prDiff + budget.response}/${budget.total}`,
   ];
   return lines.join('\n');
 }
