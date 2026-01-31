@@ -14,7 +14,7 @@ on:
       agent_token_budget:
         description: 'Token budget per agent'
         type: string
-        default: '16384'
+        default: '32768'
 
 permissions:
   contents: read

@@ -161,6 +161,35 @@ export async function requestReviewers(
 }
 
 /**
+ * Fetch the full content of a file at a specific ref.
+ * Returns null for binary/missing files.
+ */
+export async function getFileContent(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  path: string,
+  ref: string
+): Promise<string | null> {
+  try {
+    const { data } = await octokit.rest.repos.getContent({
+      owner,
+      repo,
+      path,
+      ref,
+    });
+
+    if ('content' in data && data.encoding === 'base64') {
+      return Buffer.from(data.content, 'base64').toString('utf-8');
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Review comment from GitHub
  */
 export interface ReviewComment {

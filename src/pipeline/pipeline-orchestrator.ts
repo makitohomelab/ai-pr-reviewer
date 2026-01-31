@@ -213,7 +213,8 @@ export class PipelineOrchestrator {
     prTitle: string,
     prBody: string,
     context: BaseContext,
-    delta: PRDelta
+    delta: PRDelta,
+    sourceFiles?: Map<string, string>
   ): Promise<PipelineResult> {
     // Run pre-analysis phase
     const preAnalysis = await this.runPreAnalysis(files);
@@ -224,9 +225,9 @@ export class PipelineOrchestrator {
     // Run agents
     let result: PipelineResult;
     if (this.config.executionMode === 'parallel') {
-      result = await this.runParallel(files, prTitle, prBody, context, delta);
+      result = await this.runParallel(files, prTitle, prBody, context, delta, sourceFiles);
     } else {
-      result = await this.runSequential(files, prTitle, prBody, context, delta);
+      result = await this.runSequential(files, prTitle, prBody, context, delta, sourceFiles);
     }
 
     // Attach pre-analysis results
@@ -244,7 +245,8 @@ export class PipelineOrchestrator {
     prTitle: string,
     prBody: string,
     context: BaseContext,
-    delta: PRDelta
+    delta: PRDelta,
+    sourceFiles?: Map<string, string>
   ): Promise<PipelineResult> {
     const startTime = performance.now();
     const findings: AgentFinding[] = [];
@@ -268,6 +270,7 @@ export class PipelineOrchestrator {
           baseContext: context,
           prDelta: delta,
           previousFindings: [...findings], // Sequential: share previous findings
+          sourceFiles,
         });
 
         agentOutputs.push(output);
@@ -311,7 +314,8 @@ export class PipelineOrchestrator {
     prTitle: string,
     prBody: string,
     context: BaseContext,
-    delta: PRDelta
+    delta: PRDelta,
+    sourceFiles?: Map<string, string>
   ): Promise<PipelineResult> {
     const startTime = performance.now();
 
@@ -334,6 +338,7 @@ export class PipelineOrchestrator {
           baseContext: context,
           prDelta: delta,
           previousFindings: [], // Parallel: no previous findings
+          sourceFiles,
         });
 
         if (this.config.verbose) {
