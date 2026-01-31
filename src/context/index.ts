@@ -30,6 +30,12 @@ export {
 } from './import-resolver.js';
 
 export {
+  getResolverForFile,
+  getSupportedExtensions,
+  type ImportResolver,
+} from './resolvers/index.js';
+
+export {
   buildSmartContext,
   formatSmartContext,
   type SmartContext,

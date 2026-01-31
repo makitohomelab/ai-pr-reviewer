@@ -9,6 +9,7 @@ import type { Octokit } from '@octokit/rest';
 import type { FileChange, PRContext } from '../lib/github.js';
 import { getFileContent } from '../lib/github.js';
 import { resolveAllImports } from './import-resolver.js';
+import { getSupportedExtensions } from './resolvers/index.js';
 import { estimateTokens, truncateToTokenBudget } from './token-budget.js';
 
 export interface SmartContext {
@@ -47,8 +48,11 @@ export async function buildSmartContext(
 
   // Step 1: Fetch full content of changed code files
   const changedFileContents = new Map<string, string>();
+  const supportedPattern = new RegExp(
+    `(${getSupportedExtensions().map((e) => e.replace('.', '\\.')).join('|')})$`
+  );
   const codeFiles = files.filter((f) =>
-    /\.(ts|tsx|js|jsx)$/.test(f.filename) && f.status !== 'removed'
+    supportedPattern.test(f.filename) && f.status !== 'removed'
   );
 
   const fetchPromises = codeFiles.map(async (file) => {

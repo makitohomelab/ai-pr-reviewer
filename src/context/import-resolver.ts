@@ -1,133 +1,56 @@
 /**
  * Import Resolver
  *
- * Parses import/require statements from TypeScript/JavaScript files
+ * Parses import/require statements from source files
  * and resolves them to local file paths. External packages are skipped.
+ *
+ * Delegates to language-specific resolvers for multi-language support.
  */
 
-const IMPORT_PATTERNS = [
-  // import ... from '...'
-  /import\s+(?:[\s\S]*?)\s+from\s+['"]([^'"]+)['"]/g,
-  // import '...'
-  /import\s+['"]([^'"]+)['"]/g,
-  // require('...')
-  /require\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
-  // export ... from '...'
-  /export\s+(?:[\s\S]*?)\s+from\s+['"]([^'"]+)['"]/g,
-];
+import { TypeScriptResolver } from './resolvers/typescript-resolver.js';
+import { getResolverForFile, getSupportedExtensions } from './resolvers/index.js';
 
-const CODE_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx'];
+// Default resolver for backward-compatible standalone functions
+const tsResolver = new TypeScriptResolver();
 
 /**
  * Extract import specifiers from source code.
+ * Uses TypeScript resolver for backward compatibility.
  */
 export function extractImports(source: string): string[] {
-  const imports = new Set<string>();
-
-  for (const pattern of IMPORT_PATTERNS) {
-    // Reset lastIndex for each use
-    const regex = new RegExp(pattern.source, pattern.flags);
-    let match;
-    while ((match = regex.exec(source)) !== null) {
-      imports.add(match[1]);
-    }
-  }
-
-  return [...imports];
+  return tsResolver.extractImports(source);
 }
 
 /**
  * Check if an import specifier is a local/relative import (not an external package).
+ * Uses TypeScript resolver for backward compatibility.
  */
 export function isLocalImport(specifier: string): boolean {
-  // Relative paths
-  if (specifier.startsWith('.') || specifier.startsWith('/')) {
-    return true;
-  }
-  // Project-local paths (e.g. src/lib/foo)
-  if (specifier.startsWith('src/') || specifier.startsWith('lib/')) {
-    return true;
-  }
-  return false;
+  return tsResolver.isLocalImport(specifier);
 }
 
 /**
  * Resolve an import specifier to a project-relative file path.
- *
- * @param specifier - The import specifier (e.g. './foo', '../lib/bar')
- * @param fromFile - The file containing the import (project-relative path)
- * @returns Resolved project-relative path, or null if external
+ * Uses TypeScript resolver for backward compatibility.
  */
 export function resolveImportPath(
   specifier: string,
   fromFile: string
 ): string | null {
-  if (!isLocalImport(specifier)) {
-    return null;
-  }
-
-  let resolved: string;
-
-  if (specifier.startsWith('.')) {
-    // Relative import — resolve against the importing file's directory
-    const dir = fromFile.substring(0, fromFile.lastIndexOf('/'));
-    resolved = normalizePath(`${dir}/${specifier}`);
-  } else {
-    // Project-root import (src/lib/foo)
-    resolved = specifier;
-  }
-
-  // Strip .js extension (TypeScript emits .js but source is .ts)
-  resolved = resolved.replace(/\.js$/, '');
-
-  return resolved;
+  return tsResolver.resolveImportPath(specifier, fromFile);
 }
 
 /**
  * Given a resolved path (without extension), return candidate file paths to try.
+ * Uses TypeScript resolver for backward compatibility.
  */
 export function getCandidatePaths(resolvedPath: string): string[] {
-  // If it already has a code extension, return as-is
-  if (CODE_EXTENSIONS.some((ext) => resolvedPath.endsWith(ext))) {
-    return [resolvedPath];
-  }
-
-  // Order by likelihood: .ts first, then .tsx, then .js/.jsx, then index files
-  const candidates: string[] = [
-    `${resolvedPath}.ts`,
-    `${resolvedPath}.tsx`,
-    `${resolvedPath}.js`,
-    `${resolvedPath}.jsx`,
-    `${resolvedPath}/index.ts`,
-    `${resolvedPath}/index.tsx`,
-    `${resolvedPath}/index.js`,
-    `${resolvedPath}/index.jsx`,
-  ];
-  return candidates;
-}
-
-/**
- * Normalize a path by resolving . and .. segments.
- */
-function normalizePath(path: string): string {
-  const parts = path.split('/');
-  const normalized: string[] = [];
-
-  for (const part of parts) {
-    if (part === '.' || part === '') continue;
-    if (part === '..') {
-      normalized.pop();
-    } else {
-      normalized.push(part);
-    }
-  }
-
-  return normalized.join('/');
+  return tsResolver.getCandidatePaths(resolvedPath);
 }
 
 /**
  * Resolve all local imports from a set of changed files.
- * Returns a map of base path → candidate file paths (ordered by likelihood).
+ * Supports all registered languages (TypeScript, Python, Go).
  *
  * @param fileContents - Map of filepath → full file content for changed files
  * @returns Map of base path → candidate paths to try
@@ -137,23 +60,21 @@ export function resolveAllImports(
 ): Map<string, string[]> {
   const importGroups = new Map<string, string[]>();
   const changedFiles = new Set(fileContents.keys());
+  const supportedExtensions = getSupportedExtensions();
 
   for (const [filepath, content] of fileContents) {
-    // Only process code files
-    if (!CODE_EXTENSIONS.some((ext) => filepath.endsWith(ext))) {
-      continue;
-    }
+    const resolver = getResolverForFile(filepath);
+    if (!resolver) continue;
 
-    const imports = extractImports(content);
+    const imports = resolver.extractImports(content);
 
     for (const specifier of imports) {
-      const resolved = resolveImportPath(specifier, filepath);
+      const resolved = resolver.resolveImportPath(specifier, filepath);
       if (!resolved) continue;
 
-      // Skip if already grouped
       if (importGroups.has(resolved)) continue;
 
-      const candidates = getCandidatePaths(resolved).filter(
+      const candidates = resolver.getCandidatePaths(resolved).filter(
         (c) => !changedFiles.has(c)
       );
       if (candidates.length > 0) {

@@ -131,4 +131,37 @@ describe('resolveAllImports', () => {
     const sharedGroups = [...groups.keys()].filter((k) => k.includes('shared'));
     expect(sharedGroups).toHaveLength(1);
   });
+
+  it('resolves Python imports', () => {
+    const files = new Map([
+      ['myapp/views.py', "from .utils import helper\nfrom myapp.models import User"],
+    ]);
+    const groups = resolveAllImports(files);
+    const allCandidates = [...groups.values()].flat();
+    expect(allCandidates).toContain('myapp/utils.py');
+    expect(allCandidates).toContain('myapp/models.py');
+  });
+
+  it('resolves Go imports', () => {
+    const files = new Map([
+      ['cmd/main.go', 'import (\n\t"internal/config"\n\t"./utils"\n)'],
+    ]);
+    const groups = resolveAllImports(files);
+    const allCandidates = [...groups.values()].flat();
+    expect(allCandidates).toContain('internal/config.go');
+    expect(allCandidates).toContain('cmd/utils.go');
+  });
+
+  it('handles mixed-language file sets', () => {
+    const files = new Map([
+      ['src/index.ts', "import { foo } from './lib/foo.js';"],
+      ['myapp/views.py', "from .models import User"],
+      ['cmd/main.go', 'import "internal/config"'],
+    ]);
+    const groups = resolveAllImports(files);
+    const allCandidates = [...groups.values()].flat();
+    expect(allCandidates).toContain('src/lib/foo.ts');
+    expect(allCandidates).toContain('myapp/models.py');
+    expect(allCandidates).toContain('internal/config.go');
+  });
 });
